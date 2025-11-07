@@ -3,23 +3,6 @@
 // This module only needs the count for pricing calculations
 const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-// Define initMap early to prevent Google Maps callback timing errors
-// The actual implementation is at the bottom of this file
-window.initMap = function() {
-    console.log('🗺️ initMap callback triggered (early declaration)');
-    if (typeof window.actualInitMap === 'function') {
-        window.actualInitMap();
-    } else {
-        console.warn('⚠️ actualInitMap not yet defined, will retry');
-        // Retry after a short delay
-        setTimeout(() => {
-            if (typeof window.actualInitMap === 'function') {
-                window.actualInitMap();
-            }
-        }, 500);
-    }
-};
-
 // Lazy loading state
 let allListings = []; // Store all listings
 let loadedListingsCount = 0; // Track how many listings are loaded
@@ -30,9 +13,6 @@ let lazyLoadObserver = null;
 
 // Track currently populated borough to prevent unnecessary neighborhood repopulation
 let currentPopulatedBoroughId = null;
-
-// Flag to prevent concurrent filter applications
-let isApplyingFilters = false;
 
 // Calculate dynamic price from Supabase database
 function calculateDynamicPrice(listing, selectedDaysCount) {
@@ -402,14 +382,9 @@ function renderAmenityIcons(amenities, maxVisible = 6) {
 
 // Create a listing card element
 async function createListingCard(listing) {
-    const card = document.createElement('a');
+    const card = document.createElement('div');
     card.className = 'listing-card';
     card.dataset.id = listing.id;
-    card.href = `https://view-split-lease-1.pages.dev/${listing.id}`;
-    card.target = '_blank';
-    card.rel = 'noopener noreferrer';
-    card.style.textDecoration = 'none';
-    card.style.color = 'inherit';
 
     // Load images on-demand for this specific listing
     if (!listing.images) {
@@ -432,10 +407,10 @@ async function createListingCard(listing) {
     const imageSection = hasImages ? `
         <div class="listing-images" data-current="0" data-total="${listing.images.length}">
             <img src="${listing.images[0]}" alt="${listing.title}">
-            <button class="image-nav prev-btn" onclick="event.preventDefault(); event.stopPropagation(); changeImage('${listing.id}', -1)" ${imageNavStyle}>‹</button>
-            <button class="image-nav next-btn" onclick="event.preventDefault(); event.stopPropagation(); changeImage('${listing.id}', 1)" ${imageNavStyle}>›</button>
+            <button class="image-nav prev-btn" onclick="changeImage('${listing.id}', -1)" ${imageNavStyle}>‹</button>
+            <button class="image-nav next-btn" onclick="changeImage('${listing.id}', 1)" ${imageNavStyle}>›</button>
             ${hasMultipleImages ? `<div class="image-counter"><span class="current-image">1</span> / <span class="total-images">${listing.images.length}</span></div>` : ''}
-            <button class="favorite-btn" onclick="event.preventDefault(); event.stopPropagation(); toggleFavorite('${listing.id}')">
+            <button class="favorite-btn" onclick="toggleFavorite('${listing.id}')">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
                 </svg>
@@ -468,7 +443,7 @@ async function createListingCard(listing) {
                             ${listing.host.name}
                             ${listing.host.verified ? '<span class="verified-badge" title="Verified">✓</span>' : ''}
                         </span>
-                        <button class="message-btn" onclick="event.preventDefault(); event.stopPropagation(); openContactHostModal('${listing.id}')">Message</button>
+                        <button class="message-btn" onclick="openContactHostModal('${listing.id}')">Message</button>
                     </div>
                 </div>
                 <div class="pricing-info">
@@ -658,7 +633,6 @@ function setupFilterListeners() {
             currentPopulatedBoroughId = boroughId; // Track the change
 
             // Re-apply filters with the new borough and cleared neighborhoods
-            // applyFilters() will NOT call populateNeighborhoods again since currentPopulatedBoroughId is already updated
             applyFilters();
         });
         // Initialize on load
@@ -696,24 +670,15 @@ function updateLocationText() {
 
 // Apply filters to listings - ENABLED with fallback logic
 async function applyFilters() {
-    // Prevent concurrent filter applications
-    if (isApplyingFilters) {
-        console.log('⏸️ Filter application already in progress, skipping duplicate call');
-        return;
-    }
-
-    isApplyingFilters = true;
     console.log('🔍 Applying filters to listings...');
 
     if (!window.SupabaseAPI || !window.SupabaseAPI.isInitialized) {
         console.warn('⚠️ Supabase API not initialized');
-        isApplyingFilters = false;
         return;
     }
 
     if (!window.FilterConfig) {
         console.error('❌ FilterConfig not loaded - include filter-config.js');
-        isApplyingFilters = false;
         return;
     }
 
@@ -784,9 +749,6 @@ async function applyFilters() {
             initializeLazyLoading(window.currentListings);
             updateListingCount(window.currentListings.length);
         }
-    } finally {
-        // Always reset the flag when done
-        isApplyingFilters = false;
     }
 }
 
@@ -1451,8 +1413,8 @@ window.addEventListener('load', function() {
     }, 5000); // Increased timeout to allow more time for initialization
 });
 
-// Note: window.initMap is already defined at the top of this file
-// to prevent timing errors with Google Maps callback
+// Make initMap globally available for Google Maps callback
+window.initMap = initMap;
 
 // Cleanup function for intersection observer
 function cleanupLazyLoading() {

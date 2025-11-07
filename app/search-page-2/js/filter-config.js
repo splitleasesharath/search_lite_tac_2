@@ -169,6 +169,28 @@ function getBoroughValueFromId(boroughId) {
 }
 
 /**
+ * Get borough display name from database ID (reverse lookup)
+ * @param {string} boroughId - Supabase borough _id
+ * @returns {string|null} Display name (e.g., "Manhattan") or null if not found
+ */
+function getBoroughDisplayNameFromId(boroughId) {
+    if (!BOROUGH_CACHE) {
+        console.error('❌ FilterConfig not initialized - call initializeFilterConfig() first');
+        return null;
+    }
+
+    // Search cache for matching ID
+    for (const [value, data] of Object.entries(BOROUGH_CACHE)) {
+        if (data.id === boroughId) {
+            return data.displayName;
+        }
+    }
+
+    console.warn(`⚠️ Borough ID "${boroughId}" not found in database cache`);
+    return null;
+}
+
+/**
  * Get week pattern text from frontend value
  * @param {string} weekPatternValue - Frontend week pattern select value
  * @returns {string|null} Database week pattern text
@@ -278,6 +300,7 @@ window.FilterConfig = {
     getBoroughId,
     getBoroughDisplayName,
     getBoroughValueFromId,
+    getBoroughDisplayNameFromId,
     getNeighborhoodIds,
 
     // Static configuration (safe to use without initialization)

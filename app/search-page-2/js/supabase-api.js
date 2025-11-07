@@ -622,15 +622,15 @@ class SupabaseAPI {
     }
 
     /**
-     * Normalize borough name to lowercase format (dynamically loaded from database)
+     * Normalize borough name to display format with proper capitalization (dynamically loaded from database)
      * ⚠️ NO HARDCODED VALUES - Uses FilterConfig cache from database
      */
     normalizeBoroughName(boroughId) {
         // Use dynamic lookup from FilterConfig (populated from database)
-        if (window.FilterConfig && window.FilterConfig.getBoroughValueFromId) {
-            const value = window.FilterConfig.getBoroughValueFromId(boroughId);
-            if (value) {
-                return value;
+        if (window.FilterConfig && window.FilterConfig.getBoroughDisplayNameFromId) {
+            const displayName = window.FilterConfig.getBoroughDisplayNameFromId(boroughId);
+            if (displayName) {
+                return displayName;
             }
         }
 
