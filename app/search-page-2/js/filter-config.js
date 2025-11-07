@@ -257,25 +257,13 @@ function buildFilterConfig(filterInputs) {
         config.neighborhoods = getNeighborhoodIds(filterInputs.neighborhoods);
     }
 
-    // Schedule selector filter: convert 0-based indices (Sun=0) to 1-based (Sun=1)
-    if (Array.isArray(window.selectedDays) && window.selectedDays.length > 0) {
-        const requiredDayNumbers = Array.from(new Set(
-            window.selectedDays
-                .filter(i => typeof i === 'number')
-                .map(i => i + 1) // 0-based -> 1-based
-                .filter(n => n >= 1 && n <= 7)
-        ));
+    // Schedule selector filter: use day names directly (no conversion needed)
+    if (Array.isArray(window.selectedDayNames) && window.selectedDayNames.length > 0) {
+        // Day names are already in the correct format - just pass them through
+        config.requiredDayNames = [...window.selectedDayNames];
 
-        if (requiredDayNumbers.length > 0) {
-            // Sort for stable logging and easier debugging
-            config.requiredDayNumbers = requiredDayNumbers.sort((a, b) => a - b);
-
-            // Enhanced logging for debugging
-            const dayMapping = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-            const dayNames = config.requiredDayNumbers.map(n => dayMapping[n - 1]).join(', ');
-            console.log(`🔧 Filter Config: requiredDayNumbers = [${config.requiredDayNumbers.join(', ')}]`);
-            console.log(`   → Filtering for listings with ALL of: ${dayNames}`);
-        }
+        console.log(`🔧 Filter Config: requiredDayNames = [${config.requiredDayNames.join(', ')}]`);
+        console.log(`   → Filtering for listings with ALL of these days`);
     }
 
     return config;

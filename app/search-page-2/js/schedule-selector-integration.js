@@ -12,6 +12,20 @@
     console.log('🔗 Loading Schedule Selector integration...');
 
     /**
+     * Map 0-based day indices to full day names
+     * This is the canonical mapping used throughout the application
+     */
+    const DAY_INDEX_TO_NAME = [
+        'Sunday',    // 0
+        'Monday',    // 1
+        'Tuesday',   // 2
+        'Wednesday', // 3
+        'Thursday',  // 4
+        'Friday',    // 5
+        'Saturday'   // 6
+    ];
+
+    /**
      * Parse URL parameter for days-selected
      * Format: ?days-selected=1,2,3 (1-based: 1=Sunday)
      * Returns 0-based indices for component: [0,1,2] (0=Sunday)
@@ -76,16 +90,19 @@
 
         console.log('✅ Schedule Selector mount function found');
 
-        // Get initial selection from URL, fallback to global selectedDays, then default
+        // Get initial selection from URL, fallback to default
         const urlDays = parseDaysFromURL();
-        const initialSelection = urlDays || window.selectedDays || [1, 2, 3, 4, 5];
+        const initialSelection = urlDays || [1, 2, 3, 4, 5]; // Default: Monday-Friday
 
-        // Update global selectedDays if parsed from URL
+        // Initialize global selectedDayNames with day name strings
         if (urlDays) {
-            window.selectedDays = urlDays;
+            window.selectedDayNames = urlDays.map(idx => DAY_INDEX_TO_NAME[idx]).filter(name => name !== undefined);
+        } else {
+            window.selectedDayNames = initialSelection.map(idx => DAY_INDEX_TO_NAME[idx]).filter(name => name !== undefined);
         }
 
         console.log(`📅 Initial selection: [${initialSelection.join(', ')}]`);
+        console.log(`📅 Initial day names: [${window.selectedDayNames.join(', ')}]`);
 
         // Mount the component with callbacks
         const root = window.ScheduleSelector.mount('schedule-selector-root', {
@@ -98,23 +115,21 @@
             onSelectionChange: (selectedDaysArray) => {
                 console.log('🔄 Selection changed:', selectedDaysArray);
 
-                // Update the global selectedDays array
-                // Normalize: deduplicate, validate 0-6, and sort ascending
-                const normalizedSelected = [...new Set(selectedDaysArray.map(d => d.index))]
-                    .filter(i => Number.isInteger(i) && i >= 0 && i <= 6)
-                    .sort((a, b) => a - b);
-                window.selectedDays = normalizedSelected.length > 0 ? normalizedSelected : [];
+                // Convert selected day indices to day names immediately
+                const selectedDayNames = selectedDaysArray
+                    .map(d => DAY_INDEX_TO_NAME[d.index])
+                    .filter(name => name !== undefined);
+
+                // Store day names as the canonical format
+                window.selectedDayNames = selectedDayNames.length > 0 ? selectedDayNames : [];
 
                 // Enhanced logging for debugging
-                const dayNames = selectedDaysArray.map(d => d.fullName).join(', ');
-                const dayIndices0Based = window.selectedDays.join(', ');
-                const dayIndices1Based = window.selectedDays.map(i => i + 1).join(', ');
-                console.log(`✅ Updated selectedDays (0-based): [${dayIndices0Based}]`);
-                console.log(`   → Day names: ${dayNames}`);
-                console.log(`   → Database format (1-based): [${dayIndices1Based}]`);
+                console.log(`✅ Updated selectedDayNames: [${selectedDayNames.join(', ')}]`);
+                console.log(`   → Will filter for listings with ALL of these days`);
 
-                // Update URL parameter
-                updateDaysInURL(window.selectedDays);
+                // Update URL parameter (still uses indices for brevity)
+                const selectedIndices = selectedDaysArray.map(d => d.index);
+                updateDaysInURL(selectedIndices);
 
                 // Call existing app.js functions to update the UI
                 if (typeof window.updateAllDisplayedPrices === 'function') {

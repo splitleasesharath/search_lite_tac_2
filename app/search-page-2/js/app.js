@@ -1,5 +1,6 @@
 // Day selector state
-let selectedDays = [1, 2, 3, 4, 5]; // Default to Monday-Friday
+// NOTE: Day selection is now managed by window.selectedDayNames (array of day name strings)
+// This module only needs the count for pricing calculations
 const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 // Lazy loading state
@@ -44,7 +45,9 @@ function calculateDynamicPrice(listing, selectedDaysCount) {
 
 // Update all displayed prices when day selection changes
 function updateAllDisplayedPrices() {
-    const nightsCount = Math.max(selectedDays.length - 1, 1);
+    // Get selected day count from global state
+    const selectedDaysCount = (window.selectedDayNames && window.selectedDayNames.length) || 5;
+    const nightsCount = Math.max(selectedDaysCount - 1, 1);
 
     // Update all listing cards
     document.querySelectorAll('.listing-card').forEach(card => {
@@ -54,7 +57,7 @@ function updateAllDisplayedPrices() {
             null;
 
         if (listing) {
-            const dynamicPrice = calculateDynamicPrice(listing, selectedDays.length);
+            const dynamicPrice = calculateDynamicPrice(listing, selectedDaysCount);
             const fullPriceElement = card.querySelector('.full-price');
             if (fullPriceElement) {
                 // Always display as per night since database stores per-night price
@@ -101,33 +104,61 @@ async function init() {
                     console.error('❌ FilterConfig not loaded - include filter-config.js before app.js');
                 }
 
-                // Fetch data from Supabase
+                // Populate boroughs FIRST (before applying URL parameters)
+                await populateBoroughs();
+
+                // Apply URL parameters to UI or set defaults
+                if (window.URLParamManager) {
+                    const urlFilters = window.URLParamManager.getFiltersFromURL();
+
+                    // If no borough in URL, default to Manhattan
+                    const boroughSelect = document.getElementById('boroughSelect');
+                    if (!urlFilters.borough && boroughSelect) {
+                        const manhattanOption = Array.from(boroughSelect.options).find(
+                            opt => opt.value === 'manhattan' || opt.textContent === 'Manhattan'
+                        );
+                        if (manhattanOption) {
+                            boroughSelect.value = manhattanOption.value;
+                            console.log('✅ Defaulted to Manhattan (no URL parameter)');
+                        }
+                    } else if (urlFilters.borough) {
+                        // Apply borough from URL
+                        window.URLParamManager.applyURLToUI(urlFilters);
+                    }
+                } else {
+                    console.warn('⚠️ URLParamManager not loaded');
+                }
+
+                // Populate neighborhoods for selected borough
+                const boroughSelect = document.getElementById('boroughSelect');
+                const selectedBorough = boroughSelect?.value;
+                const boroughId = window.FilterConfig ? window.FilterConfig.getBoroughId(selectedBorough) : null;
+                await populateNeighborhoods(boroughId);
+                currentPopulatedBoroughId = boroughId;
+
+                // Fetch data from Supabase with filters applied
+                console.log('🔍 Fetching listings with initial filters...');
                 const supabaseData = await window.SupabaseAPI.fetchListings();
                 if (supabaseData && supabaseData.length > 0) {
                     console.log(`✅ Loaded ${supabaseData.length} listings from Supabase`);
                     window.currentListings = supabaseData;
-                    renderListings(supabaseData);
-                    const stats = window.SupabaseAPI.getStats();
-                    console.log(`📊 Supabase stats:`, stats);
+
+                    // Hide loading skeleton
+                    if (skeleton) skeleton.classList.remove('active');
+
+                    // Setup event listeners BEFORE applying filters
+                    setupEventListeners();
+
+                    // Apply filters to get correctly filtered listings
+                    await applyFilters();
 
                     // Update map markers to match displayed cards only (after lazy loading initializes)
                     if (window.mapInstance && window.updateMapMarkers) {
                         setTimeout(() => updateMapToMatchDisplayedCards(), 1000);
                     }
 
-                    // Populate boroughs and neighborhoods from Supabase
-                    await populateBoroughs();
-                    // Get the currently selected borough and populate its neighborhoods
-                    const boroughSelect = document.getElementById('boroughSelect');
-                    const selectedBorough = boroughSelect?.value;
-                    const boroughId = window.FilterConfig ? window.FilterConfig.getBoroughId(selectedBorough) : null;
-                    await populateNeighborhoods(boroughId);
-                    currentPopulatedBoroughId = boroughId; // Track initial population
-
-                    // Hide loading skeleton
-                    if (skeleton) skeleton.classList.remove('active');
-                    setupEventListeners();
-                    updateListingCount(supabaseData.length);
+                    const stats = window.SupabaseAPI.getStats();
+                    console.log(`📊 Supabase stats:`, stats);
                     return;
                 }
             } catch (error) {
@@ -427,7 +458,7 @@ async function createListingCard(listing) {
                             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
                         </svg>
                     </div>
-                    <div class="full-price">$${calculateDynamicPrice(listing, selectedDays.length).toFixed(2)}/night</div>
+                    <div class="full-price">$${calculateDynamicPrice(listing, (window.selectedDayNames && window.selectedDayNames.length) || 5).toFixed(2)}/night</div>
                     <div class="availability-text">Message Split Lease for Availability</div>
                 </div>
             </div>
@@ -667,35 +698,23 @@ async function applyFilters() {
 
         console.log('📋 Filter inputs:', filterInputs);
 
+        // Update URL parameters with current filter values
+        if (window.URLParamManager) {
+            window.URLParamManager.updateURLParams(filterInputs);
+        }
+
         // Build filter configuration using FilterConfig
         const filterConfig = window.FilterConfig.buildFilterConfig(filterInputs);
         console.log('⚙️ Filter config:', filterConfig);
 
         // Fetch filtered listings from Supabase
-        let filteredListings = await window.SupabaseAPI.getListings(filterConfig);
+        const filteredListings = await window.SupabaseAPI.getListings(filterConfig);
 
-        // Check if any non-sort filters are applied
-        const hasActiveFilters = Object.keys(filterConfig).some(key =>
-            key !== 'sort' && filterConfig[key] && (Array.isArray(filterConfig[key]) ? filterConfig[key].length > 0 : true)
-        );
-
-        // Handle zero results case: Automatically show all listings with fallback message
-        let didFallback = false;
-        if (filteredListings.length === 0 && hasActiveFilters) {
-            console.log('⚠️ No listings match current filters - showing all listings as fallback');
-
-            // Fetch all listings without filters (keeping only the sort preference)
-            filteredListings = await window.SupabaseAPI.getListings({
-                sort: filterConfig.sort
-            });
-
-            didFallback = true;
-
-            // Show informative notice that filters yielded 0 results
-            showFilterResetNotice('No listings match your current filters. Showing all available listings instead.');
+        // Handle zero results: Show clear message to user
+        if (filteredListings.length === 0) {
+            console.log('⚠️ No listings match current filters');
+            showNoResultsNotice();
         } else {
-            // Clear notices when we have valid results
-            clearFilterResetNotice();
             clearNoResultsNotice();
         }
 
@@ -705,8 +724,8 @@ async function applyFilters() {
 
         initializeLazyLoading(filteredListings);
 
-        // Update count - show search results (0) when in fallback mode, otherwise show actual count
-        updateListingCount(didFallback ? 0 : filteredListings.length, didFallback ? filteredListings.length : null);
+        // Update count with actual results
+        updateListingCount(filteredListings.length);
 
         // Update map markers to match only currently displayed cards (not all filtered results)
         // This ensures map shows only what's visible in the listing cards
@@ -751,50 +770,11 @@ function showToast(message, type = 'info', duration = 5000) {
     }, duration);
 }
 
-// Display a notice above the listings when filters are reset due to zero results
-function showFilterResetNotice(message) {
-    const section = document.querySelector('.listings-section');
-    const container = document.getElementById('listingsContainer');
-    if (!section || !container) return;
-
-    let notice = document.getElementById('filterResetNotice');
-    if (!notice) {
-        notice = document.createElement('div');
-        notice.id = 'filterResetNotice';
-        notice.className = 'filter-reset-notice';
-        notice.style.cssText = `
-            margin: 12px 0 8px 0;
-            padding: 12px 14px;
-            border-radius: 10px;
-            background: #FFF7ED;
-            color: #9A3412;
-            border: 1px solid #FED7AA;
-            font-family: Inter, sans-serif;
-            font-size: 14px;
-            font-weight: 500;
-        `;
-        // Insert above the listings container
-        section.insertBefore(notice, container);
-    }
-    notice.textContent = message || 'No results for your selections. Filters were reset to show all listings.';
-}
-
-// Remove the filter reset notice if present
-function clearFilterResetNotice() {
-    const notice = document.getElementById('filterResetNotice');
-    if (notice && notice.parentNode) {
-        notice.parentNode.removeChild(notice);
-    }
-}
-
 // Display a "No listings found" notice when filters yield zero results
 function showNoResultsNotice() {
     const section = document.querySelector('.listings-section');
     const container = document.getElementById('listingsContainer');
     if (!section || !container) return;
-
-    // Clear any old reset notice
-    clearFilterResetNotice();
 
     let notice = document.getElementById('noResultsNotice');
     if (!notice) {
@@ -891,7 +871,6 @@ async function resetAllFilters() {
 
     // Clear the notice
     clearNoResultsNotice();
-    clearFilterResetNotice();
 
     // Apply filters with the reset values (will show all listings with default filters)
     await applyFilters();

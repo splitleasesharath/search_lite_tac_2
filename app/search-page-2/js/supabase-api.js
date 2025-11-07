@@ -66,9 +66,9 @@ class SupabaseAPI {
             // Build query with filters
             let query = this.client
                 .from('listing')
-                .select('*');
-                // Active filter removed - showing all listings regardless of Active status
-                // Removed .eq('Approved', true) - no listings have Approved=true in database
+                .select('*')
+                .eq('Active', true) // Only show active listings
+                .eq('isForUsability', false); // Exclude usability test listings
 
             // Apply borough filter
             if (filters.boroughs && filters.boroughs.length > 0) {
@@ -123,29 +123,23 @@ class SupabaseAPI {
 
             console.log(`📊 Retrieved ${rows.length} listings from Supabase`);
 
-            // Apply client-side schedule filter when necessary (JSON fields may be double-encoded strings)
-            if (filters.requiredDayNumbers && Array.isArray(filters.requiredDayNumbers) && filters.requiredDayNumbers.length > 0) {
-                const dayMapping = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-                const requiredDayNames = filters.requiredDayNumbers.map(n => dayMapping[n - 1]).join(', ');
-                console.log('  📅 Applying schedule filter (client):', filters.requiredDayNumbers);
-                console.log(`     → Required days: ${requiredDayNames}`);
-                console.log(`     → Logic: Show ONLY listings with ALL ${filters.requiredDayNumbers.length} required days`);
+            // Apply client-side schedule filter for "Days Available (List of Days)" field
+            if (filters.requiredDayNames && Array.isArray(filters.requiredDayNames) && filters.requiredDayNames.length > 0) {
+                console.log('  📅 Applying schedule filter (client):', filters.requiredDayNames);
+                console.log(`     → Required days: ${filters.requiredDayNames.join(', ')}`);
+                console.log(`     → Logic: Show listings where listing days ⊇ selected days (superset or equal)`);
+                console.log(`     → Empty/null days = available ALL days = SHOW`);
+
                 const beforeCount = rows.length;
-                const requiredSet = new Set(filters.requiredDayNumbers);
 
-                const numberToDayName = (n) => {
-                    switch (n) {
-                        case 1: return 'Sunday';
-                        case 2: return 'Monday';
-                        case 3: return 'Tuesday';
-                        case 4: return 'Wednesday';
-                        case 5: return 'Thursday';
-                        case 6: return 'Friday';
-                        case 7: return 'Saturday';
-                        default: return null;
-                    }
-                };
+                // Normalize required days: lowercase and trim for case-insensitive comparison
+                const requiredDaySet = new Set(
+                    filters.requiredDayNames.map(d => d.toLowerCase().trim())
+                );
 
+                /**
+                 * Parse JSONB field that may be double-encoded as string
+                 */
                 const parseJsonArray = (value) => {
                     if (Array.isArray(value)) return value;
                     if (typeof value === 'string') {
@@ -163,60 +157,76 @@ class SupabaseAPI {
                 const rejectedListings = [];
 
                 rows.forEach((dbListing) => {
+                    const listingName = dbListing.Name || dbListing._id || 'Unknown';
+
+                    // Parse "Days Available (List of Days)" field
+                    const rawDays = dbListing['Days Available (List of Days)'];
+                    const daysArray = parseJsonArray(rawDays);
+
                     let isMatch = false;
-                    let matchReason = '';
                     let listingDays = [];
+                    let reason = '';
 
-                    // Try numeric nights array first
-                    const rawNights = dbListing['Nights Available (numbers)'];
-                    const nightsArr = parseJsonArray(rawNights);
-                    if (Array.isArray(nightsArr)) {
-                        const nightNums = new Set(
-                            nightsArr
-                                .map((x) => (typeof x === 'number' ? x : (typeof x === 'string' ? parseInt(x, 10) : NaN)))
-                                .filter((n) => Number.isInteger(n) && n >= 1 && n <= 7)
+                    // CRITICAL: Empty/null/undefined days = available ALL days = ALWAYS SHOW
+                    if (!daysArray || !Array.isArray(daysArray) || daysArray.length === 0) {
+                        isMatch = true;
+                        reason = 'Empty days array (available ALL days)';
+                        listingDays = [];
+                    } else {
+                        // Normalize listing day names: lowercase, trim, filter valid strings
+                        const listingDaySet = new Set(
+                            daysArray
+                                .filter(d => d && typeof d === 'string')
+                                .map(d => d.toLowerCase().trim())
                         );
-                        listingDays = Array.from(nightNums).sort((a, b) => a - b);
-                        if ([...requiredSet].every((n) => nightNums.has(n))) {
-                            isMatch = true;
-                            matchReason = 'numeric match';
-                        }
-                    }
 
-                    // Fallback to day names array
-                    if (!isMatch) {
-                        const rawDays = dbListing['Days Available (List of Days)'];
-                        const daysArr = parseJsonArray(rawDays);
-                        if (Array.isArray(daysArr)) {
-                            const dayNames = new Set(daysArr.map((d) => (typeof d === 'string' ? d.trim() : '')));
-                            if ([...requiredSet].every((n) => {
-                                const name = numberToDayName(n);
-                                return !!name && dayNames.has(name);
-                            })) {
-                                isMatch = true;
-                                matchReason = 'name match';
-                            }
+                        listingDays = Array.from(listingDaySet);
+
+                        // SUPERSET CHECK: Listing must contain ALL required days
+                        // Listing can have MORE days than required (that's OK)
+                        const missingDays = [...requiredDaySet].filter(requiredDay =>
+                            !listingDaySet.has(requiredDay)
+                        );
+
+                        if (missingDays.length === 0) {
+                            isMatch = true;
+                            const extraDays = [...listingDaySet].filter(d => !requiredDaySet.has(d));
+                            reason = extraDays.length > 0
+                                ? `Has ALL required days + ${extraDays.length} extra: [${extraDays.join(', ')}]`
+                                : 'Has EXACTLY the required days';
+                        } else {
+                            isMatch = false;
+                            reason = `Missing ${missingDays.length} required day(s): [${missingDays.join(', ')}]`;
                         }
                     }
 
                     if (isMatch) {
+                        console.log(`     ✅ PASS: "${listingName}" - ${reason}`);
                         filteredListings.push(dbListing);
                     } else {
-                        rejectedListings.push({ name: dbListing.Name, days: listingDays });
+                        console.log(`     ❌ REJECT: "${listingName}" - ${reason}`);
+                        console.log(`        → Listing has: [${listingDays.join(', ')}]`);
+                        console.log(`        → Required: [${Array.from(requiredDaySet).join(', ')}]`);
+                        rejectedListings.push({
+                            name: listingName,
+                            days: listingDays,
+                            reason: reason
+                        });
                     }
                 });
 
                 rows = filteredListings;
 
-                // Log sample of rejected listings for debugging
-                if (rejectedListings.length > 0 && rejectedListings.length <= 3) {
-                    console.log(`     ⚠️ Rejected ${rejectedListings.length} listings (missing required days):`);
-                    rejectedListings.forEach(r => {
-                        console.log(`        - "${r.name}" has days: [${r.days.join(', ')}]`);
+                // Log summary with ALL rejections for debugging
+                console.log(`  📊 Schedule filter results: ${rows.length}/${beforeCount} listings match`);
+                if (rejectedListings.length > 0) {
+                    console.log(`     ❌ Rejected ${rejectedListings.length} listings:`);
+                    rejectedListings.forEach((r, idx) => {
+                        console.log(`        ${idx + 1}. "${r.name}" - ${r.reason}`);
                     });
                 }
 
-                console.log(`  ✅ Schedule filter applied: ${rows.length}/${beforeCount} listings match required days`);
+                console.log(`  ✅ Schedule filter complete: ${rows.length} listings pass filter`);
             }
 
             // Collect all unique photo IDs from all remaining listings (handles string or array)
