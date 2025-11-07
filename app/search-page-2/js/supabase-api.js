@@ -125,7 +125,11 @@ class SupabaseAPI {
 
             // Apply client-side schedule filter when necessary (JSON fields may be double-encoded strings)
             if (filters.requiredDayNumbers && Array.isArray(filters.requiredDayNumbers) && filters.requiredDayNumbers.length > 0) {
+                const dayMapping = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                const requiredDayNames = filters.requiredDayNumbers.map(n => dayMapping[n - 1]).join(', ');
                 console.log('  📅 Applying schedule filter (client):', filters.requiredDayNumbers);
+                console.log(`     → Required days: ${requiredDayNames}`);
+                console.log(`     → Logic: Show ONLY listings with ALL ${filters.requiredDayNumbers.length} required days`);
                 const beforeCount = rows.length;
                 const requiredSet = new Set(filters.requiredDayNumbers);
 
@@ -155,7 +159,14 @@ class SupabaseAPI {
                     return null;
                 };
 
-                rows = rows.filter((dbListing) => {
+                const filteredListings = [];
+                const rejectedListings = [];
+
+                rows.forEach((dbListing) => {
+                    let isMatch = false;
+                    let matchReason = '';
+                    let listingDays = [];
+
                     // Try numeric nights array first
                     const rawNights = dbListing['Nights Available (numbers)'];
                     const nightsArr = parseJsonArray(rawNights);
@@ -165,26 +176,45 @@ class SupabaseAPI {
                                 .map((x) => (typeof x === 'number' ? x : (typeof x === 'string' ? parseInt(x, 10) : NaN)))
                                 .filter((n) => Number.isInteger(n) && n >= 1 && n <= 7)
                         );
+                        listingDays = Array.from(nightNums).sort((a, b) => a - b);
                         if ([...requiredSet].every((n) => nightNums.has(n))) {
-                            return true;
+                            isMatch = true;
+                            matchReason = 'numeric match';
                         }
                     }
 
                     // Fallback to day names array
-                    const rawDays = dbListing['Days Available (List of Days)'];
-                    const daysArr = parseJsonArray(rawDays);
-                    if (Array.isArray(daysArr)) {
-                        const dayNames = new Set(daysArr.map((d) => (typeof d === 'string' ? d.trim() : '')));
-                        if ([...requiredSet].every((n) => {
-                            const name = numberToDayName(n);
-                            return !!name && dayNames.has(name);
-                        })) {
-                            return true;
+                    if (!isMatch) {
+                        const rawDays = dbListing['Days Available (List of Days)'];
+                        const daysArr = parseJsonArray(rawDays);
+                        if (Array.isArray(daysArr)) {
+                            const dayNames = new Set(daysArr.map((d) => (typeof d === 'string' ? d.trim() : '')));
+                            if ([...requiredSet].every((n) => {
+                                const name = numberToDayName(n);
+                                return !!name && dayNames.has(name);
+                            })) {
+                                isMatch = true;
+                                matchReason = 'name match';
+                            }
                         }
                     }
 
-                    return false;
+                    if (isMatch) {
+                        filteredListings.push(dbListing);
+                    } else {
+                        rejectedListings.push({ name: dbListing.Name, days: listingDays });
+                    }
                 });
+
+                rows = filteredListings;
+
+                // Log sample of rejected listings for debugging
+                if (rejectedListings.length > 0 && rejectedListings.length <= 3) {
+                    console.log(`     ⚠️ Rejected ${rejectedListings.length} listings (missing required days):`);
+                    rejectedListings.forEach(r => {
+                        console.log(`        - "${r.name}" has days: [${r.days.join(', ')}]`);
+                    });
+                }
 
                 console.log(`  ✅ Schedule filter applied: ${rows.length}/${beforeCount} listings match required days`);
             }

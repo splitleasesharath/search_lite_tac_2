@@ -12,6 +12,58 @@
     console.log('🔗 Loading Schedule Selector integration...');
 
     /**
+     * Parse URL parameter for days-selected
+     * Format: ?days-selected=1,2,3 (1-based: 1=Sunday)
+     * Returns 0-based indices for component: [0,1,2] (0=Sunday)
+     */
+    function parseDaysFromURL() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const daysParam = urlParams.get('days-selected');
+
+        if (!daysParam) {
+            return null;
+        }
+
+        try {
+            // Parse comma-separated 1-based day numbers
+            const daysArray = daysParam
+                .split(',')
+                .map(s => parseInt(s.trim(), 10))
+                .filter(n => Number.isInteger(n) && n >= 1 && n <= 7)
+                .map(n => n - 1); // Convert 1-based to 0-based
+
+            if (daysArray.length > 0) {
+                console.log(`🔗 Parsed days from URL: ${daysParam} → [${daysArray.join(', ')}] (0-based)`);
+                return daysArray;
+            }
+        } catch (e) {
+            console.warn('⚠️ Failed to parse days-selected URL parameter:', e);
+        }
+
+        return null;
+    }
+
+    /**
+     * Update URL parameter when days selection changes
+     * Format: ?days-selected=1,2,3 (1-based: 1=Sunday)
+     */
+    function updateDaysInURL(selectedIndices) {
+        const urlParams = new URLSearchParams(window.location.search);
+
+        if (selectedIndices.length > 0) {
+            // Convert 0-based to 1-based for URL
+            const daysParam = selectedIndices.map(i => i + 1).join(',');
+            urlParams.set('days-selected', daysParam);
+        } else {
+            urlParams.delete('days-selected');
+        }
+
+        // Update URL without page reload
+        const newURL = `${window.location.pathname}?${urlParams.toString()}`;
+        window.history.replaceState({}, '', newURL);
+    }
+
+    /**
      * Initialize the Schedule Selector React component
      */
     function initScheduleSelector() {
@@ -24,9 +76,14 @@
 
         console.log('✅ Schedule Selector mount function found');
 
-        // Get initial selection from the global selectedDays array
-        // app.js uses: let selectedDays = [1, 2, 3, 4, 5]; // Monday-Friday
-        const initialSelection = window.selectedDays || [1, 2, 3, 4, 5];
+        // Get initial selection from URL, fallback to global selectedDays, then default
+        const urlDays = parseDaysFromURL();
+        const initialSelection = urlDays || window.selectedDays || [1, 2, 3, 4, 5];
+
+        // Update global selectedDays if parsed from URL
+        if (urlDays) {
+            window.selectedDays = urlDays;
+        }
 
         console.log(`📅 Initial selection: [${initialSelection.join(', ')}]`);
 
@@ -48,7 +105,16 @@
                     .sort((a, b) => a - b);
                 window.selectedDays = normalizedSelected.length > 0 ? normalizedSelected : [];
 
-                console.log(`✅ Updated selectedDays: [${window.selectedDays.join(', ')}]`);
+                // Enhanced logging for debugging
+                const dayNames = selectedDaysArray.map(d => d.fullName).join(', ');
+                const dayIndices0Based = window.selectedDays.join(', ');
+                const dayIndices1Based = window.selectedDays.map(i => i + 1).join(', ');
+                console.log(`✅ Updated selectedDays (0-based): [${dayIndices0Based}]`);
+                console.log(`   → Day names: ${dayNames}`);
+                console.log(`   → Database format (1-based): [${dayIndices1Based}]`);
+
+                // Update URL parameter
+                updateDaysInURL(window.selectedDays);
 
                 // Call existing app.js functions to update the UI
                 if (typeof window.updateAllDisplayedPrices === 'function') {

@@ -269,6 +269,12 @@ function buildFilterConfig(filterInputs) {
         if (requiredDayNumbers.length > 0) {
             // Sort for stable logging and easier debugging
             config.requiredDayNumbers = requiredDayNumbers.sort((a, b) => a - b);
+
+            // Enhanced logging for debugging
+            const dayMapping = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            const dayNames = config.requiredDayNumbers.map(n => dayMapping[n - 1]).join(', ');
+            console.log(`🔧 Filter Config: requiredDayNumbers = [${config.requiredDayNumbers.join(', ')}]`);
+            console.log(`   → Filtering for listings with ALL of: ${dayNames}`);
         }
     }
 
