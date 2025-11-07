@@ -129,29 +129,11 @@ class SupabaseAPI {
             }
 
             // Build query with filters
-            // First, get all listing IDs that have active photos
-            const { data: listingsWithPhotos, error: photoError } = await this.client
-                .from('listing_photo')
-                .select('Listing')
-                .eq('Active', true);
-
-            if (photoError) {
-                console.error('❌ Error fetching listings with photos:', photoError);
-            }
-
-            // Extract unique listing IDs that have photos
-            const listingIdsWithPhotos = listingsWithPhotos
-                ? [...new Set(listingsWithPhotos.map(p => p.Listing).filter(Boolean))]
-                : [];
-
-            console.log(`📸 Found ${listingIdsWithPhotos.length} listings with active photos`);
-
             let query = this.client
                 .from('listing')
                 .select('*')
                 .eq('Active', true) // Only show active listings
-                .eq('isForUsability', false) // Exclude usability test listings
-                .in('_id', listingIdsWithPhotos); // Only show listings that have photos
+                .eq('isForUsability', false); // Exclude usability test listings
 
             // Apply borough filter
             if (filters.boroughs && filters.boroughs.length > 0) {
