@@ -17,6 +17,7 @@ class SupabaseAPI {
         this.client = null;
         this.isInitialized = false;
         this.neighborhoodLookup = {}; // Cache for neighborhood ID -> Display name mapping
+        this.listingTypeLookup = {}; // Cache for listing type ID -> Label mapping
     }
 
     /**
@@ -42,6 +43,9 @@ class SupabaseAPI {
 
             // Load neighborhood lookup data
             await this.loadNeighborhoodLookup();
+
+            // Load listing type lookup data
+            await this.loadListingTypeLookup();
 
             return true;
         } catch (error) {
@@ -75,6 +79,34 @@ class SupabaseAPI {
             console.log(`✅ Loaded ${Object.keys(this.neighborhoodLookup).length} neighborhoods into lookup`);
         } catch (error) {
             console.error('❌ Error in loadNeighborhoodLookup:', error);
+        }
+    }
+
+    /**
+     * Load all listing types to create ID -> Label lookup
+     */
+    async loadListingTypeLookup() {
+        try {
+            console.log('🏠 Loading listing type lookup data...');
+
+            const { data, error } = await this.client
+                .from('zat_features_listingtype')
+                .select('_id, "Label "');
+
+            if (error) {
+                console.error('❌ Error loading listing type lookup:', error);
+                return;
+            }
+
+            // Build lookup map
+            this.listingTypeLookup = {};
+            data.forEach(type => {
+                this.listingTypeLookup[type._id] = type['Label '];
+            });
+
+            console.log(`✅ Loaded ${Object.keys(this.listingTypeLookup).length} listing types into lookup`);
+        } catch (error) {
+            console.error('❌ Error in loadListingTypeLookup:', error);
         }
     }
 
@@ -400,7 +432,13 @@ class SupabaseAPI {
         const bedrooms = dbListing['Features - Qty Bedrooms'] || 0;
         const bathrooms = dbListing['Features - Qty Bathrooms'] || 0;
         const guests = dbListing['Features - Qty Guests'] || 1;
-        const typeOfSpace = dbListing['Features - Type of Space'] || 'Entire Place';
+
+        // Resolve listing type ID to display name using lookup
+        const typeOfSpaceId = dbListing['Features - Type of Space'];
+        const typeOfSpace = typeOfSpaceId && this.listingTypeLookup[typeOfSpaceId]
+            ? this.listingTypeLookup[typeOfSpaceId]
+            : 'Entire Place';
+
         const kitchenType = dbListing['Kitchen Type'] || 'Full Kitchen';
 
         // Extract photos using photoMap to convert IDs to URLs
