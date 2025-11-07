@@ -16,6 +16,7 @@ class SupabaseAPI {
 
         this.client = null;
         this.isInitialized = false;
+        this.neighborhoodLookup = {}; // Cache for neighborhood ID -> Display name mapping
     }
 
     /**
@@ -38,10 +39,42 @@ class SupabaseAPI {
             this.client = supabaseLib.createClient(this.supabaseUrl, this.supabaseKey);
             this.isInitialized = true;
             console.log('✅ Supabase API initialized successfully');
+
+            // Load neighborhood lookup data
+            await this.loadNeighborhoodLookup();
+
             return true;
         } catch (error) {
             console.error('❌ Failed to initialize Supabase:', error);
             return false;
+        }
+    }
+
+    /**
+     * Load all neighborhoods to create ID -> Display name lookup
+     */
+    async loadNeighborhoodLookup() {
+        try {
+            console.log('🗺️ Loading neighborhood lookup data...');
+
+            const { data, error } = await this.client
+                .from('zat_geo_hood_mediumlevel')
+                .select('_id, Display');
+
+            if (error) {
+                console.error('❌ Error loading neighborhood lookup:', error);
+                return;
+            }
+
+            // Build lookup map
+            this.neighborhoodLookup = {};
+            data.forEach(hood => {
+                this.neighborhoodLookup[hood._id] = hood.Display;
+            });
+
+            console.log(`✅ Loaded ${Object.keys(this.neighborhoodLookup).length} neighborhoods into lookup`);
+        } catch (error) {
+            console.error('❌ Error in loadNeighborhoodLookup:', error);
         }
     }
 
@@ -64,11 +97,29 @@ class SupabaseAPI {
             }
 
             // Build query with filters
+            // First, get all listing IDs that have active photos
+            const { data: listingsWithPhotos, error: photoError } = await this.client
+                .from('listing_photo')
+                .select('Listing')
+                .eq('Active', true);
+
+            if (photoError) {
+                console.error('❌ Error fetching listings with photos:', photoError);
+            }
+
+            // Extract unique listing IDs that have photos
+            const listingIdsWithPhotos = listingsWithPhotos
+                ? [...new Set(listingsWithPhotos.map(p => p.Listing).filter(Boolean))]
+                : [];
+
+            console.log(`📸 Found ${listingIdsWithPhotos.length} listings with active photos`);
+
             let query = this.client
                 .from('listing')
                 .select('*')
                 .eq('Active', true) // Only show active listings
-                .eq('isForUsability', false); // Exclude usability test listings
+                .eq('isForUsability', false) // Exclude usability test listings
+                .in('_id', listingIdsWithPhotos); // Only show listings that have photos
 
             // Apply borough filter
             if (filters.boroughs && filters.boroughs.length > 0) {
@@ -325,7 +376,12 @@ class SupabaseAPI {
         const id = dbListing._id;
         const name = dbListing.Name || 'Unnamed Listing';
         const borough = this.normalizeBoroughName(dbListing['Location - Borough']);
-        const neighborhood = dbListing['Location - Hood'] || dbListing['neighborhood (manual input by user)'] || '';
+
+        // Resolve neighborhood ID to display name using lookup
+        const neighborhoodId = dbListing['Location - Hood'];
+        const neighborhood = neighborhoodId && this.neighborhoodLookup[neighborhoodId]
+            ? this.neighborhoodLookup[neighborhoodId]
+            : (dbListing['neighborhood (manual input by user)'] || '');
 
         // Extract pricing - Supabase stores per-night rates
         // Use null instead of 0 for missing prices so downstream code can handle appropriately
