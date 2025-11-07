@@ -82,3 +82,6 @@ bun.lockb
 
 # Context directory
 Context/
+
+# Playwright MCP output
+.playwright-mcp/
