@@ -468,7 +468,7 @@ body {
     margin: 0 auto;
     padding: 2rem;
     display: grid;
-    grid-template-columns: 1fr 0.8fr;
+    grid-template-columns: 45fr 55fr;
     gap: 2rem;
     min-height: calc(100vh - 200px);
 }
