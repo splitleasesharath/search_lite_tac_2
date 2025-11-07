@@ -25,6 +25,9 @@ dist/
 
 # Legacy/Deprecated code (archived in Dump/ for reference)
 app/search-page-2/Dump/
+Dump/
+!dump/documentation/
+!dump/deprecated-scripts/
 
 # Database
 *.db
