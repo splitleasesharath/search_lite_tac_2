@@ -35,7 +35,7 @@ review_image_dir: `<absolute path to codebase>/agents/<adw_id>/<agent_name>/revi
     - Ensure screenshots clearly demonstrate that features work as specified
     - Use descriptive filenames that indicate what part of the change is being verified
 - IMPORTANT: Issue Severity Guidelines
-  - Think hard about the impact of the issue on the feature and the user
+  - ULTRATHINK about the impact of the issue on the feature and the user
   - Guidelines:
     - `skippable` - the issue is non-blocker for the work to be released but is still a problem
     - `tech_debt` - the issue is non-blocker for the work to be released but will create technical debt that should be addressed in the future
@@ -44,7 +44,7 @@ review_image_dir: `<absolute path to codebase>/agents/<adw_id>/<agent_name>/revi
   - IMPORTANT: Output your result in JSON format based on the `Report` section below.
   - IMPORTANT: Do not include any additional text, explanations, or markdown formatting
   - We'll immediately run JSON.parse() on the output, so make sure it's valid JSON
-- Ultra think as you work through the review process. Focus on the critical functionality paths and the user experience. Don't report issues if they are not critical to the feature.
+- UULTRATHINK as you work through the review process. Focus on the critical functionality paths and the user experience. Don't report issues if they are not critical to the feature.
 
 ## Setup
 

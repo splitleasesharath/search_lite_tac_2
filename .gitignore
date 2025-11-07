@@ -23,6 +23,9 @@ yarn-error.log*
 dist/
 .npm
 
+# Legacy/Deprecated code (archived in Dump/ for reference)
+app/search-page-2/Dump/
+
 # Database
 *.db
 *.sqlite

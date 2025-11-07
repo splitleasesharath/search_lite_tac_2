@@ -1,0 +1,19 @@
+CORE JAVASCRIPT FILES ANALYSIS
+
+  5131 total
+
+total 228K
+-rw-r--r-- 1 Split Lease 197121  16K Nov  6 03:40 ai-signup.js
+-rw-r--r-- 1 Split Lease 197121  59K Nov  6 06:31 app.js
+-rw-r--r-- 1 Split Lease 197121 6.6K Nov  6 03:43 config.js
+-rw-r--r-- 1 Split Lease 197121  485 Nov  4 01:17 config.local.js.example
+-rw-r--r-- 1 Split Lease 197121  14K Nov  4 01:17 database.js
+-rw-r--r-- 1 Split Lease 197121  17K Nov  4 01:17 database-optimized.js
+-rw-r--r-- 1 Split Lease 197121 9.2K Nov  5 09:12 filter-config.js
+-rw-r--r-- 1 Split Lease 197121 7.7K Nov  4 01:17 informational-text.js
+-rw-r--r-- 1 Split Lease 197121  10K Nov  4 01:17 informational-text-react.js
+-rw-r--r-- 1 Split Lease 197121 5.3K Nov  4 01:17 load-database-data.js
+-rw-r--r-- 1 Split Lease 197121 9.0K Nov  4 01:17 load-real-data.js
+-rw-r--r-- 1 Split Lease 197121 9.0K Nov  4 01:17 logger.js
+-rw-r--r-- 1 Split Lease 197121 6.3K Nov  6 06:37 schedule-selector-integration.js
+-rw-r--r-- 1 Split Lease 197121  31K Nov  6 05:28 supabase-api.js

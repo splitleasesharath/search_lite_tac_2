@@ -21,7 +21,7 @@ PORT: If `.ports.env` exists, read FRONTEND_PORT from it, otherwise default to 5
    - Use `./scripts/stop_apps.sh` to stop the server and client
 
 4. Verify the application is running:
-   - The application should be accessible at http://localhost:PORT (where PORT is from `.ports.env` or default 5173)
+   - The application should be accessible at http://localhost:PORT (where PORT is from `.ports.env` or default 5173). If port 5173 is not available, kill shells with port 5173 and retry.
    
 Note: Read `scripts/` and `README.md` for more information on how to start, stop and reset the server and client.
 

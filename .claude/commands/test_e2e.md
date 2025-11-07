@@ -7,11 +7,11 @@ Execute end-to-end (E2E) tests using Playwright browser automation (MCP Server).
 adw_id: $ARGUMENT if provided, otherwise generate a random 8 character hex string
 agent_name: $ARGUMENT if provided, otherwise use 'test_e2e'
 e2e_test_file: $ARGUMENT
-application_url: $ARGUMENT if provided, otherwise use http://localhost:8080 (static HTML server)
+application_url: $ARGUMENT if provided, otherwise use http://localhost:8000 (Split Lease Search Page server)
 
 ## Instructions
 
-- If `application_url` was not provided, use default http://localhost:8080
+- If `application_url` was not provided, use default http://localhost:8000
 - Verify the application is running (if server returns error, the test setup failed)
 - Read the `e2e_test_file`
 - Digest the `User Story` to first understand what we're validating
@@ -22,38 +22,45 @@ application_url: $ARGUMENT if provided, otherwise use http://localhost:8080 (sta
 - IMPORTANT: Return results in the format requested by the `Output Format`
 - Initialize Playwright browser in headed mode for visibility
 - Use the determined `application_url`
-- Allow time for async operations and element visibility (React Islands may take time to mount)
+- Allow time for async operations and element visibility (React Islands like SearchScheduleSelector, ContactHost, and AiSignup may take time to mount)
 - IMPORTANT: After taking each screenshot, save it to `Screenshot Directory` with descriptive names. Use absolute paths to move the files to the `Screenshot Directory` with the correct name.
 - Capture and report any errors encountered
 - Ultra think about the `Test Steps` and execute them in order
-- If you encounter an error, mark the test as failed immediately and explain exactly what went wrong and on what step it occurred. For example: '(Step 1 ❌) Failed to find element with selector "#site-header" on page "http://localhost:8080"'
+- If you encounter an error, mark the test as failed immediately and explain exactly what went wrong and on what step it occurred. For example: '(Step 1 ❌) Failed to find element with selector ".header" on page "http://localhost:8000"'
 - Use `pwd` or equivalent to get the absolute path to the codebase for writing and displaying the correct paths to the screenshots
 
 ## Setup
 
-Before running E2E tests, ensure the application is prepared:
+Before running E2E tests, ensure the Split Lease Search Page application is prepared:
 
-1. **Build React Components** (if not already built):
+1. **Install Dependencies** (if not already installed):
    ```bash
-   cd app/split-lease/components
    npm install
-   npm run build
    ```
 
-2. **Start Static File Server**:
+2. **Build React Components** (if not already built):
    ```bash
-   cd app/split-lease/pages
-   npx live-server --port=8080 --no-browser &
+   npm run build:components
    ```
-   OR use Python:
+   This builds the ScheduleSelector React component to `dist/schedule-selector.js`
+
+3. **Start Development Server**:
    ```bash
-   cd app/split-lease/pages
-   python -m http.server 8080 &
+   python -m http.server 8000
+   ```
+   OR use the Python server script:
+   ```bash
+   npm start
    ```
 
-3. **Verify Server is Running**:
-   - Navigate to http://localhost:8080 and ensure the page loads
-   - Check that React components mount correctly (Header, Footer, SearchScheduleSelector)
+4. **Verify Server is Running**:
+   - Navigate to http://localhost:8000 and ensure the page loads
+   - Check that React components mount correctly:
+     - Schedule Selector (7-day picker at top of filters)
+     - Contact Host Modal
+     - AI Signup Modal
+   - Verify Google Maps loads with property markers
+   - Confirm Supabase data loads (boroughs and neighborhoods populate in dropdowns)
 
 ## Screenshot Directory
 

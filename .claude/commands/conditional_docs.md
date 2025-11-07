@@ -9,7 +9,28 @@ This prompt helps you determine what documentation you should read based on the 
   - IMPORTANT: Only read the documentation if any one of the conditions match your task
 - IMPORTANT: You don't want to excessively read documentation. Only read the documentation if it's relevant to your task.
 
+## Building for Truth
+
+When implementing solutions, prioritize authenticity and appropriate scale over complexity:
+
+- **No Fallback Mechanisms When Things Get Tough**: When you encounter challenges or limitations, resist the temptation to add fallback logic, compatibility layers, or workarounds. These create technical debt and obscure the real problem. Instead, solve the root issue or acknowledge the constraint honestly.
+
+- **Match Solution to Scale**: Don't build skyscrapers in a small town. Assess the actual requirements and scale your solution appropriately. Over-engineering for hypothetical future needs creates unnecessary complexity, maintenance burden, and cognitive overhead.
+
+- **Embrace Constraints**: Work within the natural boundaries of your tools and architecture. If something is difficult to implement, that friction is often a signal that you're fighting against the design rather than working with it.
+
+- **Be Direct**: Choose simple, direct solutions that clearly express intent over clever abstractions. Future maintainers (including yourself) will thank you for code that does exactly what it says, nothing more.
+
 ## Conditional Documentation
+
+- .claude/commands/code_convention.md
+  - Conditions:
+    - When reading any code file
+    - When writing or modifying any code
+    - When reviewing code changes
+    - When creating new files or functions
+    - When refactoring existing code
+    - IMPORTANT: Always follow these conventions to maintain code quality and consistency
 
 - README.md
   - Conditions:
