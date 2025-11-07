@@ -3,6 +3,23 @@
 // This module only needs the count for pricing calculations
 const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+// Define initMap early to prevent Google Maps callback timing errors
+// The actual implementation is at the bottom of this file
+window.initMap = function() {
+    console.log('🗺️ initMap callback triggered (early declaration)');
+    if (typeof window.actualInitMap === 'function') {
+        window.actualInitMap();
+    } else {
+        console.warn('⚠️ actualInitMap not yet defined, will retry');
+        // Retry after a short delay
+        setTimeout(() => {
+            if (typeof window.actualInitMap === 'function') {
+                window.actualInitMap();
+            }
+        }, 500);
+    }
+};
+
 // Lazy loading state
 let allListings = []; // Store all listings
 let loadedListingsCount = 0; // Track how many listings are loaded
@@ -13,6 +30,9 @@ let lazyLoadObserver = null;
 
 // Track currently populated borough to prevent unnecessary neighborhood repopulation
 let currentPopulatedBoroughId = null;
+
+// Flag to prevent concurrent filter applications
+let isApplyingFilters = false;
 
 // Calculate dynamic price from Supabase database
 function calculateDynamicPrice(listing, selectedDaysCount) {
@@ -152,9 +172,9 @@ async function init() {
                     // Apply filters to get correctly filtered listings
                     await applyFilters();
 
-                    // Update map markers to match displayed cards only (after lazy loading initializes)
+                    // Update map markers to show all filtered results
                     if (window.mapInstance && window.updateMapMarkers) {
-                        setTimeout(() => updateMapToMatchDisplayedCards(), 1000);
+                        setTimeout(() => updateMapToMatchFilteredResults(), 1000);
                     }
 
                     const stats = window.SupabaseAPI.getStats();
@@ -257,9 +277,6 @@ async function loadMoreListings() {
         window.registerPriceInfoTriggers();
     }
 
-    // Update map to show only the currently displayed listings
-    updateMapToMatchDisplayedCards();
-
     isLoading = false;
 }
 
@@ -336,15 +353,16 @@ function getDisplayedListings() {
     return displayedListings;
 }
 
-// Update map markers to match only the currently displayed listing cards
-function updateMapToMatchDisplayedCards() {
+// Update map markers to show all filtered results (not just displayed cards)
+function updateMapToMatchFilteredResults() {
     if (!window.mapInstance || !window.updateMapMarkers) {
         return;
     }
 
-    const displayedListings = getDisplayedListings();
-    console.log(`🗺️ Updating map to show only ${displayedListings.length} displayed listings`);
-    window.updateMapMarkers(displayedListings);
+    // Show ALL filtered listings on the map, not just lazy-loaded ones
+    const allFilteredListings = allListings;
+    console.log(`🗺️ Updating map to show all ${allFilteredListings.length} filtered listings`);
+    window.updateMapMarkers(allFilteredListings);
 }
 
 // Render amenity icons with tooltips
@@ -382,9 +400,14 @@ function renderAmenityIcons(amenities, maxVisible = 6) {
 
 // Create a listing card element
 async function createListingCard(listing) {
-    const card = document.createElement('div');
+    const card = document.createElement('a');
     card.className = 'listing-card';
     card.dataset.id = listing.id;
+    card.href = `https://view-split-lease-1.pages.dev/${listing.id}`;
+    card.target = '_blank';
+    card.rel = 'noopener noreferrer';
+    card.style.textDecoration = 'none';
+    card.style.color = 'inherit';
 
     // Load images on-demand for this specific listing
     if (!listing.images) {
@@ -407,10 +430,10 @@ async function createListingCard(listing) {
     const imageSection = hasImages ? `
         <div class="listing-images" data-current="0" data-total="${listing.images.length}">
             <img src="${listing.images[0]}" alt="${listing.title}">
-            <button class="image-nav prev-btn" onclick="changeImage('${listing.id}', -1)" ${imageNavStyle}>‹</button>
-            <button class="image-nav next-btn" onclick="changeImage('${listing.id}', 1)" ${imageNavStyle}>›</button>
+            <button class="image-nav prev-btn" onclick="event.preventDefault(); event.stopPropagation(); changeImage('${listing.id}', -1)" ${imageNavStyle}>‹</button>
+            <button class="image-nav next-btn" onclick="event.preventDefault(); event.stopPropagation(); changeImage('${listing.id}', 1)" ${imageNavStyle}>›</button>
             ${hasMultipleImages ? `<div class="image-counter"><span class="current-image">1</span> / <span class="total-images">${listing.images.length}</span></div>` : ''}
-            <button class="favorite-btn" onclick="toggleFavorite('${listing.id}')">
+            <button class="favorite-btn" onclick="event.preventDefault(); event.stopPropagation(); toggleFavorite('${listing.id}')">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
                 </svg>
@@ -443,7 +466,7 @@ async function createListingCard(listing) {
                             ${listing.host.name}
                             ${listing.host.verified ? '<span class="verified-badge" title="Verified">✓</span>' : ''}
                         </span>
-                        <button class="message-btn" onclick="openContactHostModal('${listing.id}')">Message</button>
+                        <button class="message-btn" onclick="event.preventDefault(); event.stopPropagation(); openContactHostModal('${listing.id}')">Message</button>
                     </div>
                 </div>
                 <div class="pricing-info">
@@ -633,6 +656,7 @@ function setupFilterListeners() {
             currentPopulatedBoroughId = boroughId; // Track the change
 
             // Re-apply filters with the new borough and cleared neighborhoods
+            // applyFilters() will NOT call populateNeighborhoods again since currentPopulatedBoroughId is already updated
             applyFilters();
         });
         // Initialize on load
@@ -670,15 +694,24 @@ function updateLocationText() {
 
 // Apply filters to listings - ENABLED with fallback logic
 async function applyFilters() {
+    // Prevent concurrent filter applications
+    if (isApplyingFilters) {
+        console.log('⏸️ Filter application already in progress, skipping duplicate call');
+        return;
+    }
+
+    isApplyingFilters = true;
     console.log('🔍 Applying filters to listings...');
 
     if (!window.SupabaseAPI || !window.SupabaseAPI.isInitialized) {
         console.warn('⚠️ Supabase API not initialized');
+        isApplyingFilters = false;
         return;
     }
 
     if (!window.FilterConfig) {
         console.error('❌ FilterConfig not loaded - include filter-config.js');
+        isApplyingFilters = false;
         return;
     }
 
@@ -727,9 +760,8 @@ async function applyFilters() {
         // Update count with actual results
         updateListingCount(filteredListings.length);
 
-        // Update map markers to match only currently displayed cards (not all filtered results)
-        // This ensures map shows only what's visible in the listing cards
-        updateMapToMatchDisplayedCards();
+        // Update map markers to show all filtered results
+        updateMapToMatchFilteredResults();
 
         // Re-populate neighborhoods ONLY if borough has changed (preserves checked state)
         const boroughSelect = document.getElementById('boroughSelect');
@@ -749,6 +781,9 @@ async function applyFilters() {
             initializeLazyLoading(window.currentListings);
             updateListingCount(window.currentListings.length);
         }
+    } finally {
+        // Always reset the flag when done
+        isApplyingFilters = false;
     }
 }
 
@@ -1127,114 +1162,145 @@ window.actualInitMap = function() {
 
     // Store map instance globally
     window.mapInstance = map;
-    window.mapMarkers = [];
+    window.mapMarkers = {
+        green: [], // All active listings (background layer)
+        purple: [] // Filtered results (foreground layer)
+    };
 
-    // Function to add markers from current listings
-    window.updateMapMarkers = function(listings) {
-        console.log(`📍 Updating map markers with ${listings ? listings.length : 0} listings`);
+    // Fetch and store all active listings for green markers
+    window.allActiveListings = [];
 
-        // Clear existing markers
-        if (window.mapMarkers && window.mapMarkers.length > 0) {
-            console.log(`🗑️ Clearing ${window.mapMarkers.length} existing markers`);
-            window.mapMarkers.forEach(marker => {
-                if (marker.setMap) marker.setMap(null);
-            });
-            window.mapMarkers = [];
-        }
-
-        if (!listings || listings.length === 0) {
-            console.log('⚠️ No listings to display on map');
+    // Function to fetch all active listings (no filters)
+    window.fetchAllActiveListings = async function() {
+        if (!window.SupabaseAPI || !window.SupabaseAPI.isInitialized) {
+            console.warn('⚠️ Cannot fetch all active listings - Supabase not initialized');
             return;
         }
 
-        let addedCount = 0;
-        let skippedCount = 0;
+        try {
+            console.log('🌍 Fetching ALL active listings for map background...');
+            const allListings = await window.SupabaseAPI.getListings({}); // No filters = all active
+            window.allActiveListings = allListings;
+            console.log(`✅ Fetched ${allListings.length} active listings for green markers`);
+        } catch (error) {
+            console.error('❌ Error fetching all active listings:', error);
+        }
+    };
 
-        // Process each listing
-        for (const listing of listings) {
-            let coordinates = null;
-            const listingName = listing.Name || listing.title || listing.id;
+    // Function to add markers - now supports two layers
+    window.updateMapMarkers = function(filteredListings) {
+        console.log(`📍 Updating map markers`);
+        console.log(`  - Green layer: ${window.allActiveListings ? window.allActiveListings.length : 0} listings (all active)`);
+        console.log(`  - Purple layer: ${filteredListings ? filteredListings.length : 0} listings (filtered results)`);
 
-            // Debug: Log the listing data structure
-            if (addedCount < 3 || skippedCount < 3) {
-                console.log(`\n🔍 Processing listing: ${listingName}`);
-                console.log('  - listing.coordinates:', listing.coordinates);
-                console.log('  - listing.listing_address_latitude:', listing.listing_address_latitude);
-                console.log('  - listing.listing_address_longitude:', listing.listing_address_longitude);
-            }
+        // Clear existing markers from both layers
+        if (window.mapMarkers.green && window.mapMarkers.green.length > 0) {
+            console.log(`🗑️ Clearing ${window.mapMarkers.green.length} green markers`);
+            window.mapMarkers.green.forEach(marker => {
+                if (marker.setMap) marker.setMap(null);
+            });
+            window.mapMarkers.green = [];
+        }
 
-            // Check if listing already has coordinates object
-            if (listing.coordinates && listing.coordinates.lat && listing.coordinates.lng) {
-                // Validate coordinates are numbers
-                const lat = parseFloat(listing.coordinates.lat);
-                const lng = parseFloat(listing.coordinates.lng);
-                if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
-                    coordinates = { lat, lng };
-                    if (addedCount < 3) {
-                        console.log(`  ✅ Using listing.coordinates: ${lat}, ${lng}`);
-                    }
+        if (window.mapMarkers.purple && window.mapMarkers.purple.length > 0) {
+            console.log(`🗑️ Clearing ${window.mapMarkers.purple.length} purple markers`);
+            window.mapMarkers.purple.forEach(marker => {
+                if (marker.setMap) marker.setMap(null);
+            });
+            window.mapMarkers.purple = [];
+        }
+
+        let greenAddedCount = 0;
+        let greenSkippedCount = 0;
+        let purpleAddedCount = 0;
+        let purpleSkippedCount = 0;
+
+        // First, add ALL active listings in green (background layer)
+        if (window.allActiveListings && window.allActiveListings.length > 0) {
+            for (const listing of window.allActiveListings) {
+                const coordinates = extractCoordinates(listing);
+                if (coordinates) {
+                    addPriceMarker(map, coordinates, listing, '#00C851', window.mapMarkers.green);
+                    greenAddedCount++;
                 } else {
-                    if (skippedCount < 3) {
-                        console.warn(`  ⚠️ Invalid coordinates in listing.coordinates: lat=${lat}, lng=${lng}`);
-                    }
+                    greenSkippedCount++;
                 }
             }
-            // Check for database lat/lng fields
-            else if (listing.listing_address_latitude && listing.listing_address_longitude) {
-                const lat = parseFloat(listing.listing_address_latitude);
-                const lng = parseFloat(listing.listing_address_longitude);
-                if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
-                    coordinates = { lat, lng };
-                    if (addedCount < 3) {
-                        console.log(`  ✅ Using listing_address fields: ${lat}, ${lng}`);
-                    }
-                } else {
-                    if (skippedCount < 3) {
-                        console.warn(`  ⚠️ Invalid coordinates in listing_address fields: lat=${lat}, lng=${lng}`);
-                    }
-                }
+            console.log(`✅ Green markers: ${greenAddedCount} added, ${greenSkippedCount} skipped`);
+        }
+
+        // Then, add filtered results in purple (foreground layer)
+        if (!filteredListings || filteredListings.length === 0) {
+            console.log('⚠️ No filtered listings to display in purple');
+            return;
+        }
+
+        // Process each filtered listing
+        for (const listing of filteredListings) {
+            const coordinates = extractCoordinates(listing);
+            if (coordinates) {
+                addPriceMarker(map, coordinates, listing, '#31135D', window.mapMarkers.purple);
+                purpleAddedCount++;
             } else {
-                if (skippedCount < 3) {
-                    console.warn(`  ❌ No coordinate fields found in listing`);
-                }
-            }
-
-            // If we have valid coordinates, add the marker
-            if (coordinates && coordinates.lat && coordinates.lng) {
-                const price = listing['Starting nightly price'] ||
-                             listing['💰Nightly Host Rate for 7 nights'] ||
-                             listing['💰Nightly Host Rate for 2 nights'] ||
-                             listing.price?.starting ||
-                             0;
-
-                const title = listing.Name || listing.title || 'Split Lease Property';
-                const location = listing['Location - Hood'] ||
-                                listing['neighborhood (manual input by user)'] ||
-                                listing['Location - Borough'] ||
-                                listing.location ||
-                                'Manhattan';
-
-                addPriceMarker(map, coordinates, price, title, location, listing);
-                addedCount++;
-            } else {
-                console.warn(`❌ No valid coordinates for listing: ${listingName}`);
-                skippedCount++;
+                purpleSkippedCount++;
             }
         }
 
-        console.log(`✅ Map markers updated: ${addedCount} added, ${skippedCount} skipped (no coordinates)`);
-        console.log(`📊 Total markers on map: ${window.mapMarkers.length}`);
+        console.log(`✅ Purple markers: ${purpleAddedCount} added, ${purpleSkippedCount} skipped`);
+        console.log(`📊 Total markers on map: ${window.mapMarkers.green.length} green + ${window.mapMarkers.purple.length} purple = ${window.mapMarkers.green.length + window.mapMarkers.purple.length}`);
     };
 
+    // Helper function to extract coordinates from listing
+    function extractCoordinates(listing) {
+        let coordinates = null;
+        const listingName = listing.Name || listing.title || listing.id;
+
+        // Check if listing already has coordinates object
+        if (listing.coordinates && listing.coordinates.lat && listing.coordinates.lng) {
+            // Validate coordinates are numbers
+            const lat = parseFloat(listing.coordinates.lat);
+            const lng = parseFloat(listing.coordinates.lng);
+            if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
+                coordinates = { lat, lng };
+            }
+        }
+        // Check for database lat/lng fields
+        else if (listing.listing_address_latitude && listing.listing_address_longitude) {
+            const lat = parseFloat(listing.listing_address_latitude);
+            const lng = parseFloat(listing.listing_address_longitude);
+            if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
+                coordinates = { lat, lng };
+            }
+        }
+
+        return coordinates;
+    }
+
     // Function to add a single price marker
-    function addPriceMarker(map, coordinates, price, title, location, listing) {
+    function addPriceMarker(map, coordinates, listing, color, markersArray) {
+        const price = listing['Starting nightly price'] ||
+                     listing['💰Nightly Host Rate for 7 nights'] ||
+                     listing['💰Nightly Host Rate for 2 nights'] ||
+                     listing.price?.starting ||
+                     0;
+
+        const title = listing.Name || listing.title || 'Split Lease Property';
+        const location = listing['Location - Hood'] ||
+                        listing['neighborhood (manual input by user)'] ||
+                        listing['Location - Borough'] ||
+                        listing.location ||
+                        'Manhattan';
+
+        // Determine hover color based on base color
+        const hoverColor = color === '#00C851' ? '#00A040' : '#522580';
+
         const markerOverlay = new google.maps.OverlayView();
         markerOverlay.onAdd = function() {
             const priceTag = document.createElement('div');
             priceTag.innerHTML = `$${parseFloat(price).toFixed(2)}`;
             priceTag.style.cssText = `
                 position: absolute;
-                background: #31135D;
+                background: ${color};
                 color: white;
                 padding: 6px 12px;
                 border-radius: 20px;
@@ -1242,24 +1308,24 @@ window.actualInitMap = function() {
                 font-size: 14px;
                 font-family: 'Inter', sans-serif;
                 white-space: nowrap;
-                box-shadow: 0 2px 6px rgba(255, 255, 255, 0.15);
+                box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
                 cursor: pointer;
                 transition: background-color 0.2s ease, transform 0.2s ease;
                 will-change: transform;
                 transform: translate(-50%, -50%);
-                z-index: 1;
+                z-index: ${color === '#31135D' ? '2' : '1'};
             `;
 
             priceTag.addEventListener('mouseenter', () => {
-                priceTag.style.background = '#522580';
+                priceTag.style.background = hoverColor;
                 priceTag.style.transform = 'translate(-50%, -50%) scale(1.1)';
                 priceTag.style.zIndex = '10';
             });
 
             priceTag.addEventListener('mouseleave', () => {
-                priceTag.style.background = '#31135D';
+                priceTag.style.background = color;
                 priceTag.style.transform = 'translate(-50%, -50%) scale(1)';
-                priceTag.style.zIndex = '1';
+                priceTag.style.zIndex = color === '#31135D' ? '2' : '1';
             });
 
             const infoWindow = new google.maps.InfoWindow({
@@ -1300,21 +1366,29 @@ window.actualInitMap = function() {
         };
 
         markerOverlay.setMap(map);
-        window.mapMarkers.push(markerOverlay);
+        markersArray.push(markerOverlay);
     }
 
-    // Use current listings from Supabase
-    const listingsToMap = window.currentListings;
+    // Fetch all active listings for green markers
+    console.log('🌍 Fetching all active listings for green background layer...');
+    window.fetchAllActiveListings().then(() => {
+        // Use current filtered listings for purple markers
+        const listingsToMap = window.currentListings;
 
-    // Add markers for each listing
-    if (listingsToMap && listingsToMap.length > 0) {
-        console.log(`🗺️ Preparing to add ${listingsToMap.length} listings to map`);
+        // Add markers for both layers
+        if (listingsToMap && listingsToMap.length > 0) {
+            console.log(`🗺️ Preparing to add markers to map`);
+            console.log(`  - ${window.allActiveListings.length} green markers (all active)`);
+            console.log(`  - ${listingsToMap.length} purple markers (filtered)`);
 
-        // Always use updateMapMarkers for consistency
-        window.updateMapMarkers(listingsToMap);
-    } else {
-        console.log('⚠️ No listings available for map');
-    }
+            // Update map with both layers
+            window.updateMapMarkers(listingsToMap);
+        } else {
+            console.log('⚠️ No filtered listings available for purple markers');
+            // Still show green markers
+            window.updateMapMarkers([]);
+        }
+    });
 
     console.log('✅ Map initialized successfully');
     console.log('📐 Map element dimensions:', mapElement.offsetWidth, 'x', mapElement.offsetHeight);
@@ -1413,8 +1487,8 @@ window.addEventListener('load', function() {
     }, 5000); // Increased timeout to allow more time for initialization
 });
 
-// Make initMap globally available for Google Maps callback
-window.initMap = initMap;
+// Note: window.initMap is already defined at the top of this file
+// to prevent timing errors with Google Maps callback
 
 // Cleanup function for intersection observer
 function cleanupLazyLoading() {
