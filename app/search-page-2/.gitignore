@@ -81,7 +81,7 @@ pip-delete-this-directory.txt
 # -----------------------------------------------------------------------------
 # Build Outputs & Distribution
 # -----------------------------------------------------------------------------
-dist/
+# dist/  # COMMENTED OUT - We need to commit dist/ for Cloudflare Pages deployment
 build/
 .next/
 out/
