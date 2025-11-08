@@ -128,19 +128,11 @@ class SupabaseAPI {
                 console.log('📋 Active filters:', filters);
             }
 
-            // Build query with filters and foreign key expansion for host data
-            // Foreign key chain: listing."Host / Landlord" → account_host.User → user table."Profile Photo"
+            // Build query with filters
+            // Note: Host data will be fetched separately due to lack of formal FK constraints
             let query = this.client
                 .from('listing')
-                .select(`
-                    *,
-                    Host_landlord:account_host!Host / Landlord(
-                        User(
-                            "Profile Photo",
-                            Name
-                        )
-                    )
-                `)
+                .select('*')
                 .eq('Active', true) // Only show active listings
                 .eq('isForUsability', false); // Exclude usability test listings
 
@@ -303,6 +295,9 @@ class SupabaseAPI {
                 console.log(`  ✅ Schedule filter complete: ${rows.length} listings pass filter`);
             }
 
+            // Fetch host data for all listings in batch
+            const hostMap = await this.fetchHostData(rows);
+
             // Collect all unique photo IDs from all remaining listings (handles string or array)
             const allPhotoIds = new Set();
             const collectIdsFrom = (photosField) => {
@@ -316,23 +311,18 @@ class SupabaseAPI {
                     }
                 }
             };
-            
+
             // Collect listing photo IDs
             rows.forEach(listing => collectIdsFrom(listing['Features - Photos']));
 
-            // Collect host profile photo IDs from the foreign key chain
-            // Navigate: listing → Host_landlord → User → "Profile Photo"
-            rows.forEach(listing => {
-                try {
-                    const profilePhotoId = listing.Host_landlord?.User?.['Profile Photo'];
-                    if (profilePhotoId && typeof profilePhotoId === 'string') {
-                        // Check if it looks like a photo ID (not a URL)
-                        if (!profilePhotoId.startsWith('http://') && !profilePhotoId.startsWith('https://') && !profilePhotoId.startsWith('//')) {
-                            allPhotoIds.add(profilePhotoId);
-                        }
+            // Collect host profile photo IDs from hostMap
+            Object.values(hostMap).forEach(hostData => {
+                const profilePhotoId = hostData?.profilePhoto;
+                if (profilePhotoId && typeof profilePhotoId === 'string') {
+                    // Check if it looks like a photo ID (not a URL)
+                    if (!profilePhotoId.startsWith('http://') && !profilePhotoId.startsWith('https://') && !profilePhotoId.startsWith('//')) {
+                        allPhotoIds.add(profilePhotoId);
                     }
-                } catch (error) {
-                    console.warn(`⚠️ Error extracting profile photo for listing ${listing._id}:`, error);
                 }
             });
 
@@ -342,7 +332,7 @@ class SupabaseAPI {
             const photoMap = await this.fetchPhotoUrls(Array.from(allPhotoIds));
 
             // Transform the raw Supabase data to match the app's expected format
-            const transformedListings = rows.map(listing => this.transformListing(listing, photoMap));
+            const transformedListings = rows.map(listing => this.transformListing(listing, photoMap, hostMap));
 
             return transformedListings;
         } catch (error) {
@@ -394,12 +384,94 @@ class SupabaseAPI {
     }
 
     /**
+     * Fetch host data for listings in batch
+     * @param {Array<Object>} listings - Array of listings
+     * @returns {Promise<Object>} Map of account_host ID to host data
+     */
+    async fetchHostData(listings) {
+        const hostIds = new Set();
+
+        // Collect unique host IDs
+        listings.forEach(listing => {
+            const hostId = listing['Host / Landlord'];
+            if (hostId && typeof hostId === 'string') {
+                hostIds.add(hostId);
+            }
+        });
+
+        if (hostIds.size === 0) {
+            return {};
+        }
+
+        try {
+            // Fetch account_host records
+            const { data: accountHostData, error: accountError } = await this.client
+                .from('account_host')
+                .select('_id, User')
+                .in('_id', Array.from(hostIds));
+
+            if (accountError) {
+                console.error('❌ Error fetching account_host data:', accountError);
+                return {};
+            }
+
+            // Collect user IDs
+            const userIds = new Set();
+            accountHostData.forEach(account => {
+                if (account.User) {
+                    userIds.add(account.User);
+                }
+            });
+
+            if (userIds.size === 0) {
+                return {};
+            }
+
+            // Fetch user records
+            const { data: userData, error: userError } = await this.client
+                .from('user')
+                .select('_id, Name, "Profile Photo"')
+                .in('_id', Array.from(userIds));
+
+            if (userError) {
+                console.error('❌ Error fetching user data:', userError);
+                return {};
+            }
+
+            // Create user map
+            const userMap = {};
+            userData.forEach(user => {
+                userMap[user._id] = {
+                    name: user.Name || 'Host',
+                    profilePhoto: user['Profile Photo']
+                };
+            });
+
+            // Create host map keyed by account_host ID
+            const hostMap = {};
+            accountHostData.forEach(account => {
+                const userId = account.User;
+                if (userId && userMap[userId]) {
+                    hostMap[account._id] = userMap[userId];
+                }
+            });
+
+            console.log(`✅ Fetched host data for ${Object.keys(hostMap).length} hosts`);
+            return hostMap;
+        } catch (error) {
+            console.error('❌ Error in fetchHostData:', error);
+            return {};
+        }
+    }
+
+    /**
      * Transform Supabase listing to app format
      * @param {Object} dbListing - Raw listing from Supabase
      * @param {Object} photoMap - Map of photo IDs to URLs
+     * @param {Object} hostMap - Map of account_host ID to host data
      * @returns {Object} Transformed listing
      */
-    transformListing(dbListing, photoMap = {}) {
+    transformListing(dbListing, photoMap = {}, hostMap = {}) {
         // Extract basic info
         const id = dbListing._id;
         const name = dbListing.Name || 'Unnamed Listing';
@@ -459,40 +531,29 @@ class SupabaseAPI {
             lng: address?.lng || -73.9855
         };
 
-        // Extract host info from foreign key chain
-        // Navigate: listing → Host_landlord → User
+        // Extract host info from hostMap
         let hostName = 'Host';
         let hostImage = null;
 
-        try {
-            // Get host name from User table via foreign key chain
-            const userName = dbListing.Host_landlord?.User?.Name;
-            if (userName && typeof userName === 'string') {
-                hostName = userName;
-            }
+        const hostId = dbListing['Host / Landlord'];
+        if (hostId && hostMap[hostId]) {
+            const hostData = hostMap[hostId];
+            hostName = hostData.name || 'Host';
 
-            // Get profile photo ID from User table via foreign key chain
-            const profilePhotoId = dbListing.Host_landlord?.User?.['Profile Photo'];
+            // Resolve profile photo ID to URL
+            const profilePhotoId = hostData.profilePhoto;
             if (profilePhotoId && typeof profilePhotoId === 'string') {
                 // If it looks like a photo ID (not a URL), look it up in photoMap
                 if (!profilePhotoId.startsWith('http://') && !profilePhotoId.startsWith('https://') && !profilePhotoId.startsWith('//')) {
                     const resolvedUrl = photoMap[profilePhotoId];
                     if (resolvedUrl) {
-                        console.log(`✅ Listing ${id}: Resolved host profile photo ID "${profilePhotoId}" → ${resolvedUrl.substring(0, 60)}...`);
                         hostImage = resolvedUrl;
-                    } else {
-                        console.warn(`⚠️ Listing ${id}: Host profile photo ID "${profilePhotoId}" not found in photoMap`);
-                        hostImage = null;
                     }
                 } else {
                     // Already a URL, use directly
                     hostImage = profilePhotoId;
                 }
-            } else {
-                console.log(`ℹ️ Listing ${id}: No profile photo found in foreign key chain`);
             }
-        } catch (error) {
-            console.error(`❌ Listing ${id}: Error extracting host data from foreign key chain:`, error);
         }
 
         // Extract availability info
