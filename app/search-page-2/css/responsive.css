@@ -199,7 +199,7 @@
     }
 
     .listing-title {
-        font-size: 18px;
+        font-size: 22px;
     }
 
     .listing-footer {
@@ -224,7 +224,7 @@
     .message-btn {
         width: 100%;
         padding: 0.75rem;
-        font-size: 14px;
+        font-size: 16px;
     }
 
     /* AI Research Card Mobile */
@@ -319,7 +319,7 @@
     }
 
     .listing-title {
-        font-size: 16px;
+        font-size: 19px;
     }
 
     .ai-research-card {
