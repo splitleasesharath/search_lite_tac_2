@@ -129,17 +129,15 @@ class SupabaseAPI {
             }
 
             // Build query with filters and foreign key expansion for host data
-            // Foreign key chain: listing → "Host / landlord" → "Account - Host" → User → "Profile Photo"
+            // Foreign key chain: listing."Host / Landlord" → account_host.User → user table."Profile Photo"
             let query = this.client
                 .from('listing')
                 .select(`
                     *,
-                    Host_landlord:Host / landlord(
-                        Account_Host:Account - Host(
-                            User(
-                                "Profile Photo",
-                                Name
-                            )
+                    Host_landlord:account_host!Host / Landlord(
+                        User(
+                            "Profile Photo",
+                            Name
                         )
                     )
                 `)
@@ -323,10 +321,10 @@ class SupabaseAPI {
             rows.forEach(listing => collectIdsFrom(listing['Features - Photos']));
 
             // Collect host profile photo IDs from the foreign key chain
-            // Navigate: listing → Host_landlord → Account_Host → User → "Profile Photo"
+            // Navigate: listing → Host_landlord → User → "Profile Photo"
             rows.forEach(listing => {
                 try {
-                    const profilePhotoId = listing.Host_landlord?.Account_Host?.User?.['Profile Photo'];
+                    const profilePhotoId = listing.Host_landlord?.User?.['Profile Photo'];
                     if (profilePhotoId && typeof profilePhotoId === 'string') {
                         // Check if it looks like a photo ID (not a URL)
                         if (!profilePhotoId.startsWith('http://') && !profilePhotoId.startsWith('https://') && !profilePhotoId.startsWith('//')) {
@@ -462,19 +460,19 @@ class SupabaseAPI {
         };
 
         // Extract host info from foreign key chain
-        // Navigate: listing → Host_landlord → Account_Host → User
+        // Navigate: listing → Host_landlord → User
         let hostName = 'Host';
         let hostImage = null;
 
         try {
             // Get host name from User table via foreign key chain
-            const userName = dbListing.Host_landlord?.Account_Host?.User?.Name;
+            const userName = dbListing.Host_landlord?.User?.Name;
             if (userName && typeof userName === 'string') {
                 hostName = userName;
             }
 
             // Get profile photo ID from User table via foreign key chain
-            const profilePhotoId = dbListing.Host_landlord?.Account_Host?.User?.['Profile Photo'];
+            const profilePhotoId = dbListing.Host_landlord?.User?.['Profile Photo'];
             if (profilePhotoId && typeof profilePhotoId === 'string') {
                 // If it looks like a photo ID (not a URL), look it up in photoMap
                 if (!profilePhotoId.startsWith('http://') && !profilePhotoId.startsWith('https://') && !profilePhotoId.startsWith('//')) {
