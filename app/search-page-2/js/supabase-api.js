@@ -137,7 +137,7 @@ class SupabaseAPI {
                     Host_landlord:Host / landlord(
                         Account_Host:Account - Host(
                             User(
-                                Profile Photo,
+                                "Profile Photo",
                                 Name
                             )
                         )
