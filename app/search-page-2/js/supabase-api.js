@@ -430,7 +430,7 @@ class SupabaseAPI {
             // Fetch user records
             const { data: userData, error: userError } = await this.client
                 .from('user')
-                .select('_id, Name, "Profile Photo"')
+                .select('_id, "Name - Full", "Profile Photo"')
                 .in('_id', Array.from(userIds));
 
             if (userError) {
@@ -442,7 +442,7 @@ class SupabaseAPI {
             const userMap = {};
             userData.forEach(user => {
                 userMap[user._id] = {
-                    name: user.Name || 'Host',
+                    name: user['Name - Full'] || 'Host',
                     profilePhoto: user['Profile Photo']
                 };
             });
@@ -551,7 +551,12 @@ class SupabaseAPI {
                     }
                 } else {
                     // Already a URL, use directly
-                    hostImage = profilePhotoId;
+                    // Add https: protocol for protocol-relative URLs
+                    if (profilePhotoId.startsWith('//')) {
+                        hostImage = 'https:' + profilePhotoId;
+                    } else {
+                        hostImage = profilePhotoId;
+                    }
                 }
             }
         }

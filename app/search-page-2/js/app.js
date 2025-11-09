@@ -1310,14 +1310,15 @@ window.actualInitMap = function() {
                 white-space: nowrap;
                 box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
                 cursor: pointer;
-                transition: background-color 0.2s ease, transform 0.2s ease;
-                will-change: transform;
+                transition: background-color 0.2s ease;
                 transform: translate(-50%, -50%);
                 z-index: ${color === '#31135D' ? '2' : '1'};
             `;
 
             priceTag.addEventListener('mouseenter', () => {
                 priceTag.style.background = hoverColor;
+                // Add transition for smooth hover effect only
+                priceTag.style.transition = 'background-color 0.2s ease, transform 0.2s ease';
                 priceTag.style.transform = 'translate(-50%, -50%) scale(1.1)';
                 priceTag.style.zIndex = '10';
             });
@@ -1326,6 +1327,10 @@ window.actualInitMap = function() {
                 priceTag.style.background = color;
                 priceTag.style.transform = 'translate(-50%, -50%) scale(1)';
                 priceTag.style.zIndex = color === '#31135D' ? '2' : '1';
+                // Remove transition after hover ends to prevent reanimation during map drag
+                setTimeout(() => {
+                    priceTag.style.transition = 'background-color 0.2s ease';
+                }, 200);
             });
 
             const infoWindow = new google.maps.InfoWindow({
