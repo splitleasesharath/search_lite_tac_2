@@ -450,7 +450,7 @@ async function createListingCard(listing) {
                      onclick="event.preventDefault(); event.stopPropagation(); window.zoomToListing('${listing.id}', event)"
                      role="button"
                      tabindex="0"
-                     onkeypress="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); window.zoomToListing('${listing.id}', event); }"
+                     onkeydown="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); window.zoomToListing('${listing.id}', event); }"
                      title="Click to view on map"
                      aria-label="View ${listing.location} on map">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -1098,12 +1098,46 @@ function updateListingCount(count = 0, fallbackCount = null) {
  * Zooms and centers the map to a specific listing's location
  * @param {string} listingId - The ID of the listing to zoom to
  */
+// Global state for zoom operation management
+window.zoomOperationState = {
+    isZooming: false,
+    activeTimeouts: [],
+    currentAnimationFrameId: null,
+    lastLocationElement: null
+};
+
 window.zoomToListing = function(listingId, event) {
     console.log('Zooming to listing:', listingId);
+
+    // Race condition prevention: Cancel any in-progress zoom operation
+    if (window.zoomOperationState.isZooming) {
+        console.log('Cancelling previous zoom operation');
+
+        // Cancel all pending timeouts
+        window.zoomOperationState.activeTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+        window.zoomOperationState.activeTimeouts = [];
+
+        // Cancel animation frame if exists
+        if (window.zoomOperationState.currentAnimationFrameId !== null) {
+            cancelAnimationFrame(window.zoomOperationState.currentAnimationFrameId);
+            window.zoomOperationState.currentAnimationFrameId = null;
+        }
+
+        // Restore UI state from previous operation
+        document.body.style.cursor = '';
+        if (window.zoomOperationState.lastLocationElement) {
+            window.zoomOperationState.lastLocationElement.style.opacity = '1';
+        }
+    }
+
+    // Set operation lock
+    window.zoomOperationState.isZooming = true;
 
     // Add loading cursor
     document.body.style.cursor = 'wait';
     const locationElement = event?.target?.closest('.listing-location');
+    window.zoomOperationState.lastLocationElement = locationElement;
+
     if (locationElement) {
         locationElement.style.opacity = '0.6';
     }
@@ -1114,12 +1148,20 @@ window.zoomToListing = function(listingId, event) {
 
     if (!listing) {
         console.error('Listing not found:', listingId);
+        // Clean up operation state
+        window.zoomOperationState.isZooming = false;
+        document.body.style.cursor = '';
+        if (locationElement) locationElement.style.opacity = '1';
         return;
     }
 
     // Verify map instance exists
     if (!window.mapInstance) {
         console.error('Map not initialized yet. Please wait for map to load.');
+        // Clean up operation state
+        window.zoomOperationState.isZooming = false;
+        document.body.style.cursor = '';
+        if (locationElement) locationElement.style.opacity = '1';
         return;
     }
 
@@ -1133,6 +1175,10 @@ window.zoomToListing = function(listingId, event) {
     if (!coords.lat || !coords.lng || coords.lat === 0 || coords.lng === 0) {
         console.error('Invalid coordinates for listing:', listingId, coords);
         alert('Location coordinates not available for this listing.');
+        // Clean up operation state
+        window.zoomOperationState.isZooming = false;
+        document.body.style.cursor = '';
+        if (locationElement) locationElement.style.opacity = '1';
         return;
     }
 
@@ -1171,31 +1217,38 @@ window.zoomToListing = function(listingId, event) {
         const mapSection = document.getElementById('mapSection');
         if (mapSection && !mapSection.classList.contains('active')) {
             mapSection.classList.add('active');
-            // Scroll map into view smoothly
-            setTimeout(() => {
+            // Scroll map into view smoothly - tracked timeout
+            const scrollTimeout = setTimeout(() => {
                 mapSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }, 100);
+            window.zoomOperationState.activeTimeouts.push(scrollTimeout);
         }
     }
 
     // Highlight the marker
     window.highlightMarker(listingId);
 
-    // Show info window with listing details
-    setTimeout(() => {
+    // Show info window with listing details - tracked timeout
+    const infoWindowTimeout = setTimeout(() => {
         window.showListingInfoWindow(listingId);
     }, 600); // Delay to allow map pan to complete
+    window.zoomOperationState.activeTimeouts.push(infoWindowTimeout);
 
     // Optional: Show success feedback
     console.log(`Map centered at: ${coords.lat}, ${coords.lng} (Zoom: ${zoomLevel})`);
 
-    // Restore cursor after animation completes
-    setTimeout(() => {
+    // Restore cursor after animation completes - tracked timeout
+    const cleanupTimeout = setTimeout(() => {
         document.body.style.cursor = '';
         if (locationElement) {
             locationElement.style.opacity = '1';
         }
+        // Release operation lock
+        window.zoomOperationState.isZooming = false;
+        window.zoomOperationState.activeTimeouts = [];
+        window.zoomOperationState.lastLocationElement = null;
     }, 800);
+    window.zoomOperationState.activeTimeouts.push(cleanupTimeout);
 };
 
 /**
@@ -1203,6 +1256,12 @@ window.zoomToListing = function(listingId, event) {
  * @param {string} listingId - The ID of the listing marker to highlight
  */
 window.highlightMarker = function(listingId) {
+    // Cancel any existing highlight timeouts to prevent overlap
+    if (window.markerHighlightTimeouts) {
+        window.markerHighlightTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+    }
+    window.markerHighlightTimeouts = [];
+
     // Get all markers from both layers
     const allMarkers = [
         ...(window.mapMarkers?.green || []),
@@ -1236,21 +1295,32 @@ window.highlightMarker = function(listingId) {
         targetMarker.div.style.zIndex = '999';
         targetMarker.div.style.boxShadow = '0 8px 16px rgba(49, 19, 93, 0.4)';
 
-        // Pulse animation
-        setTimeout(() => {
-            targetMarker.div.style.transform = 'scale(1.4)';
+        // Pulse animation - track timeouts
+        const pulseTimeout1 = setTimeout(() => {
+            if (targetMarker.div) {
+                targetMarker.div.style.transform = 'scale(1.4)';
+            }
         }, 150);
+        window.markerHighlightTimeouts.push(pulseTimeout1);
 
-        setTimeout(() => {
-            targetMarker.div.style.transform = 'scale(1.3)';
+        const pulseTimeout2 = setTimeout(() => {
+            if (targetMarker.div) {
+                targetMarker.div.style.transform = 'scale(1.3)';
+            }
         }, 300);
+        window.markerHighlightTimeouts.push(pulseTimeout2);
 
-        // Reset after 3 seconds
-        setTimeout(() => {
-            targetMarker.div.style.transform = 'scale(1)';
-            targetMarker.div.style.boxShadow = '';
-            targetMarker.div.style.zIndex = targetMarker.div.classList.contains('purple') ? '2' : '1';
+        // Reset after 3 seconds - track timeout
+        const resetTimeout = setTimeout(() => {
+            if (targetMarker.div) {
+                targetMarker.div.style.transform = 'scale(1)';
+                targetMarker.div.style.boxShadow = '';
+                targetMarker.div.style.zIndex = targetMarker.div.classList.contains('purple') ? '2' : '1';
+            }
+            // Clear timeout array after reset completes
+            window.markerHighlightTimeouts = [];
         }, 3000);
+        window.markerHighlightTimeouts.push(resetTimeout);
 
         console.log('Marker highlighted for listing:', listingId);
     } else {
@@ -1340,11 +1410,16 @@ window.smoothPanTo = function(targetCoords, duration = 1000) {
         map.setCenter({ lat: currentLat, lng: currentLng });
 
         if (progress < 1) {
-            requestAnimationFrame(animate);
+            // Track animation frame ID for cancellation support
+            window.zoomOperationState.currentAnimationFrameId = requestAnimationFrame(animate);
+        } else {
+            // Animation complete, clear the frame ID
+            window.zoomOperationState.currentAnimationFrameId = null;
         }
     };
 
-    animate();
+    // Start animation and track initial frame
+    window.zoomOperationState.currentAnimationFrameId = requestAnimationFrame(animate);
 };
 
 // Initialize Google Maps
