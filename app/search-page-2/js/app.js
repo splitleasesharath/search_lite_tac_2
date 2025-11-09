@@ -661,6 +661,11 @@ function setupFilterListeners() {
             await populateNeighborhoods(boroughId);
             currentPopulatedBoroughId = boroughId; // Track the change
 
+            // Zoom map to the selected borough
+            if (selectedBorough) {
+                window.zoomToBorough(selectedBorough);
+            }
+
             // Re-apply filters with the new borough and cleared neighborhoods
             // applyFilters() will NOT call populateNeighborhoods again since currentPopulatedBoroughId is already updated
             applyFilters();
@@ -1106,6 +1111,35 @@ window.zoomOperationState = {
     lastLocationElement: null
 };
 
+// NYC Borough Map Configuration - Accurate geographic centers and optimal zoom levels
+const BOROUGH_MAP_CONFIG = {
+    'manhattan': {
+        name: 'Manhattan',
+        center: { lat: 40.7831, lng: -73.9712 },  // Times Square area
+        zoom: 12  // Shows full Manhattan from Battery to Inwood
+    },
+    'brooklyn': {
+        name: 'Brooklyn',
+        center: { lat: 40.6782, lng: -73.9442 },  // Downtown Brooklyn
+        zoom: 12  // Shows full Brooklyn from DUMBO to Coney Island
+    },
+    'queens': {
+        name: 'Queens',
+        center: { lat: 40.7282, lng: -73.7949 },  // Forest Hills area
+        zoom: 11  // Larger area - wider view from Astoria to Far Rockaway
+    },
+    'bronx': {
+        name: 'Bronx',
+        center: { lat: 40.8448, lng: -73.8648 },  // Fordham area
+        zoom: 12  // Shows full Bronx from Riverdale to Throgs Neck
+    },
+    'staten-island': {
+        name: 'Staten Island',
+        center: { lat: 40.5795, lng: -74.1502 },  // St. George area
+        zoom: 11  // Larger area - wider view from North Shore to South Beach
+    }
+};
+
 window.zoomToListing = function(listingId, event) {
     console.log('Zooming to listing:', listingId);
 
@@ -1248,6 +1282,129 @@ window.zoomToListing = function(listingId, event) {
         window.zoomOperationState.activeTimeouts = [];
         window.zoomOperationState.lastLocationElement = null;
     }, 800);
+    window.zoomOperationState.activeTimeouts.push(cleanupTimeout);
+};
+
+/**
+ * Zooms and centers the map to a specific NYC borough
+ * @param {string} boroughValue - The borough identifier (e.g., 'manhattan', 'brooklyn')
+ */
+window.zoomToBorough = function(boroughValue) {
+    if (!boroughValue) {
+        console.warn('⚠️ No borough value provided to zoomToBorough');
+        return;
+    }
+
+    console.log(`🗺️ Zooming to borough: ${boroughValue}`);
+
+    // Race condition prevention: Cancel any in-progress zoom operation
+    if (window.zoomOperationState.isZooming) {
+        console.log('⏸️ Cancelling previous zoom operation');
+
+        // Cancel all pending timeouts
+        window.zoomOperationState.activeTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+        window.zoomOperationState.activeTimeouts = [];
+
+        // Cancel animation frame if exists
+        if (window.zoomOperationState.currentAnimationFrameId !== null) {
+            cancelAnimationFrame(window.zoomOperationState.currentAnimationFrameId);
+            window.zoomOperationState.currentAnimationFrameId = null;
+        }
+
+        // Restore UI state from previous operation
+        document.body.style.cursor = '';
+        if (window.zoomOperationState.lastLocationElement) {
+            window.zoomOperationState.lastLocationElement.style.opacity = '1';
+        }
+    }
+
+    // Set operation lock
+    window.zoomOperationState.isZooming = true;
+
+    // Add loading cursor for visual feedback
+    document.body.style.cursor = 'wait';
+
+    // Verify map instance exists
+    if (!window.mapInstance) {
+        console.error('❌ Map not initialized yet. Please wait for map to load.');
+        // Clean up operation state
+        window.zoomOperationState.isZooming = false;
+        document.body.style.cursor = '';
+        return;
+    }
+
+    // Normalize borough value to lowercase for lookup
+    const boroughKey = boroughValue.toLowerCase();
+
+    // Get borough configuration
+    const boroughConfig = BOROUGH_MAP_CONFIG[boroughKey];
+
+    if (!boroughConfig) {
+        console.error(`❌ Unknown borough: ${boroughValue}`);
+        console.error(`Available boroughs:`, Object.keys(BOROUGH_MAP_CONFIG));
+        // Clean up operation state
+        window.zoomOperationState.isZooming = false;
+        document.body.style.cursor = '';
+        return;
+    }
+
+    // Validate coordinates
+    const coords = boroughConfig.center;
+    const zoomLevel = boroughConfig.zoom;
+
+    if (!coords.lat || !coords.lng) {
+        console.error(`❌ Invalid coordinates for borough: ${boroughValue}`, coords);
+        // Clean up operation state
+        window.zoomOperationState.isZooming = false;
+        document.body.style.cursor = '';
+        return;
+    }
+
+    // Smoothly zoom and pan to the borough
+    console.log(`📍 Panning to ${boroughConfig.name}: ${coords.lat}, ${coords.lng} (Zoom: ${zoomLevel})`);
+    window.mapInstance.setZoom(zoomLevel);
+    window.smoothPanTo(coords, 800); // 800ms smooth animation
+
+    // Track analytics
+    if (typeof gtag !== 'undefined') {
+        gtag('event', 'map_zoom_to_borough', {
+            event_category: 'Map Interaction',
+            event_label: boroughConfig.name,
+            borough_value: boroughValue,
+            zoom_level: zoomLevel
+        });
+    }
+
+    // Log to console for debugging
+    console.log(`✅ Analytics: Map zoom to borough`, {
+        borough: boroughConfig.name,
+        coordinates: coords,
+        zoom: zoomLevel
+    });
+
+    // On mobile, ensure map section is visible
+    if (window.innerWidth < 768) {
+        const mapSection = document.getElementById('mapSection');
+        if (mapSection && !mapSection.classList.contains('active')) {
+            mapSection.classList.add('active');
+            console.log('📱 Mobile: Opening map section');
+            // Scroll map into view smoothly - tracked timeout
+            const scrollTimeout = setTimeout(() => {
+                mapSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }, 100);
+            window.zoomOperationState.activeTimeouts.push(scrollTimeout);
+        }
+    }
+
+    // Restore cursor after animation completes - tracked timeout
+    const cleanupTimeout = setTimeout(() => {
+        document.body.style.cursor = '';
+        // Release operation lock
+        window.zoomOperationState.isZooming = false;
+        window.zoomOperationState.activeTimeouts = [];
+        window.zoomOperationState.lastLocationElement = null;
+        console.log(`✅ Borough zoom complete: ${boroughConfig.name}`);
+    }, 800);  // Match smoothPanTo duration
     window.zoomOperationState.activeTimeouts.push(cleanupTimeout);
 };
 
