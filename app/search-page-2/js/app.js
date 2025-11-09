@@ -446,8 +446,14 @@ async function createListingCard(listing) {
         ${imageSection}
         <div class="listing-content">
             <div class="listing-info">
-                <div class="listing-location">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <div class="listing-location"
+                     onclick="event.preventDefault(); event.stopPropagation(); window.zoomToListing('${listing.id}', event)"
+                     role="button"
+                     tabindex="0"
+                     onkeypress="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); window.zoomToListing('${listing.id}', event); }"
+                     title="Click to view on map"
+                     aria-label="View ${listing.location} on map">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
                         <circle cx="12" cy="10" r="3"/>
                     </svg>
@@ -1088,6 +1094,259 @@ function updateListingCount(count = 0, fallbackCount = null) {
     }
 }
 
+/**
+ * Zooms and centers the map to a specific listing's location
+ * @param {string} listingId - The ID of the listing to zoom to
+ */
+window.zoomToListing = function(listingId, event) {
+    console.log('Zooming to listing:', listingId);
+
+    // Add loading cursor
+    document.body.style.cursor = 'wait';
+    const locationElement = event?.target?.closest('.listing-location');
+    if (locationElement) {
+        locationElement.style.opacity = '0.6';
+    }
+
+    // Find the listing in either the current or all listings arrays
+    const listing = allListings.find(l => l.id === listingId) ||
+                   window.currentListings.find(l => l.id === listingId);
+
+    if (!listing) {
+        console.error('Listing not found:', listingId);
+        return;
+    }
+
+    // Verify map instance exists
+    if (!window.mapInstance) {
+        console.error('Map not initialized yet. Please wait for map to load.');
+        return;
+    }
+
+    // Get coordinates from listing data
+    const coords = listing.coordinates || {
+        lat: listing.listing_address_latitude,
+        lng: listing.listing_address_longitude
+    };
+
+    // Validate coordinates
+    if (!coords.lat || !coords.lng || coords.lat === 0 || coords.lng === 0) {
+        console.error('Invalid coordinates for listing:', listingId, coords);
+        alert('Location coordinates not available for this listing.');
+        return;
+    }
+
+    // Determine optimal zoom level based on borough
+    let zoomLevel = 16; // Default zoom for street-level view
+    if (listing.borough === 'Manhattan') {
+        zoomLevel = 17; // Closer zoom for dense areas
+    } else if (listing.borough === 'Staten Island' || listing.borough === 'Queens') {
+        zoomLevel = 15; // Wider view for less dense areas
+    }
+
+    // Smoothly zoom and pan to the location
+    window.mapInstance.setZoom(zoomLevel);
+    window.smoothPanTo(coords, 800); // 800ms smooth animation
+
+    // Track analytics
+    if (typeof gtag !== 'undefined') {
+        gtag('event', 'map_zoom_from_listing', {
+            event_category: 'Map Interaction',
+            event_label: listing.location,
+            listing_id: listingId,
+            borough: listing.borough,
+            neighborhood: listing.neighborhood
+        });
+    }
+
+    // Log to console in development
+    console.log('Analytics: Map zoom', {
+        listingId,
+        location: listing.location,
+        coordinates: coords
+    });
+
+    // On mobile, ensure map section is visible
+    if (window.innerWidth < 768) {
+        const mapSection = document.getElementById('mapSection');
+        if (mapSection && !mapSection.classList.contains('active')) {
+            mapSection.classList.add('active');
+            // Scroll map into view smoothly
+            setTimeout(() => {
+                mapSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }, 100);
+        }
+    }
+
+    // Highlight the marker
+    window.highlightMarker(listingId);
+
+    // Show info window with listing details
+    setTimeout(() => {
+        window.showListingInfoWindow(listingId);
+    }, 600); // Delay to allow map pan to complete
+
+    // Optional: Show success feedback
+    console.log(`Map centered at: ${coords.lat}, ${coords.lng} (Zoom: ${zoomLevel})`);
+
+    // Restore cursor after animation completes
+    setTimeout(() => {
+        document.body.style.cursor = '';
+        if (locationElement) {
+            locationElement.style.opacity = '1';
+        }
+    }, 800);
+};
+
+/**
+ * Highlights a specific marker on the map temporarily
+ * @param {string} listingId - The ID of the listing marker to highlight
+ */
+window.highlightMarker = function(listingId) {
+    // Get all markers from both layers
+    const allMarkers = [
+        ...(window.mapMarkers?.green || []),
+        ...(window.mapMarkers?.purple || [])
+    ];
+
+    if (allMarkers.length === 0) {
+        console.warn('No markers available to highlight');
+        return;
+    }
+
+    // Reset all markers to normal state first
+    allMarkers.forEach(marker => {
+        if (marker.div) {
+            // Remove any existing highlight transforms
+            marker.div.style.transform = marker.div.style.transform
+                .replace(/scale\([^)]+\)/g, '')
+                .trim();
+            // Reset z-index to layer default
+            marker.div.style.zIndex = marker.div.classList.contains('purple') ? '2' : '1';
+            marker.div.style.transition = 'transform 0.3s ease, box-shadow 0.3s ease';
+        }
+    });
+
+    // Find and highlight the target marker
+    const targetMarker = allMarkers.find(m => m.listingId === listingId);
+
+    if (targetMarker && targetMarker.div) {
+        // Apply highlight effect
+        targetMarker.div.style.transform = 'scale(1.3)';
+        targetMarker.div.style.zIndex = '999';
+        targetMarker.div.style.boxShadow = '0 8px 16px rgba(49, 19, 93, 0.4)';
+
+        // Pulse animation
+        setTimeout(() => {
+            targetMarker.div.style.transform = 'scale(1.4)';
+        }, 150);
+
+        setTimeout(() => {
+            targetMarker.div.style.transform = 'scale(1.3)';
+        }, 300);
+
+        // Reset after 3 seconds
+        setTimeout(() => {
+            targetMarker.div.style.transform = 'scale(1)';
+            targetMarker.div.style.boxShadow = '';
+            targetMarker.div.style.zIndex = targetMarker.div.classList.contains('purple') ? '2' : '1';
+        }, 3000);
+
+        console.log('Marker highlighted for listing:', listingId);
+    } else {
+        console.warn('Marker not found for listing:', listingId);
+    }
+};
+
+/**
+ * Shows an info window for a specific listing on the map
+ * @param {string} listingId - The ID of the listing
+ */
+window.showListingInfoWindow = function(listingId) {
+    const listing = allListings.find(l => l.id === listingId) ||
+                   window.currentListings.find(l => l.id === listingId);
+
+    if (!listing || !window.mapInstance) return;
+
+    const coords = listing.coordinates || {
+        lat: listing.listing_address_latitude,
+        lng: listing.listing_address_longitude
+    };
+
+    // Close any existing info windows
+    if (window.currentInfoWindow) {
+        window.currentInfoWindow.close();
+    }
+
+    // Create info window content
+    const contentHTML = `
+        <div style="padding: 12px; max-width: 280px; font-family: system-ui, -apple-system, sans-serif;">
+            <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600; color: #1f2937;">
+                ${listing.title || 'Listing'}
+            </h3>
+            <p style="margin: 0 0 8px 0; font-size: 14px; color: #6b7280; display: flex; align-items: center; gap: 4px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                    <circle cx="12" cy="10" r="3"/>
+                </svg>
+                ${listing.location}
+            </p>
+            <p style="margin: 0; font-size: 18px; font-weight: 700; color: #31135d;">
+                $${listing.price?.starting || listing['Starting nightly price'] || 'N/A'}
+                <span style="font-size: 14px; font-weight: 400; color: #6b7280;">/night</span>
+            </p>
+        </div>
+    `;
+
+    // Create and open info window
+    const infoWindow = new google.maps.InfoWindow({
+        content: contentHTML,
+        position: coords
+    });
+
+    infoWindow.open(window.mapInstance);
+    window.currentInfoWindow = infoWindow;
+
+    // Auto-close after 5 seconds
+    setTimeout(() => {
+        infoWindow.close();
+    }, 5000);
+};
+
+/**
+ * Smoothly animates map pan to a location
+ * @param {Object} targetCoords - {lat, lng}
+ * @param {number} duration - Animation duration in ms
+ */
+window.smoothPanTo = function(targetCoords, duration = 1000) {
+    const map = window.mapInstance;
+    if (!map) return;
+
+    const startCoords = map.getCenter();
+    const startTime = Date.now();
+
+    const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+
+        // Easing function (ease-in-out)
+        const eased = progress < 0.5
+            ? 2 * progress * progress
+            : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+
+        const currentLat = startCoords.lat() + (targetCoords.lat - startCoords.lat()) * eased;
+        const currentLng = startCoords.lng() + (targetCoords.lng - startCoords.lng()) * eased;
+
+        map.setCenter({ lat: currentLat, lng: currentLng });
+
+        if (progress < 1) {
+            requestAnimationFrame(animate);
+        }
+    };
+
+    animate();
+};
+
 // Initialize Google Maps
 window.actualInitMap = function() {
     console.log('🗺️ initMap called');
@@ -1371,6 +1630,7 @@ window.actualInitMap = function() {
         };
 
         markerOverlay.setMap(map);
+        markerOverlay.listingId = listing.id; // Store listing ID for marker identification
         markersArray.push(markerOverlay);
     }
 
